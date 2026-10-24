@@ -82,6 +82,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.laser_panel, "ЛАЗЕР")
         self.tabs.addTab(self.camera_panel, "КАМЕРА")
         self.tabs.setMinimumWidth(320)
+        self.tabs.setCurrentWidget(self.laser_panel)
 
         header = self._build_header()
         center = QWidget()
@@ -141,7 +142,7 @@ class MainWindow(QMainWindow):
         mark.setStyleSheet(f"color:{style.PAPER}; font-size:20pt; font-weight:900; letter-spacing:-1px;")
         dot = QLabel("●")
         dot.setStyleSheet(f"color:{style.RED}; font-size:14pt;")
-        sub = QLabel("ЛАЗЕРНЫЙ ГРАВЕР K40 · LHYMICRO-GL")
+        sub = QLabel("ЛАЗЕРНЫЙ ГРАВЕР")
         sub.setStyleSheet(f"color:{style.GREY}; letter-spacing:2px; font-size:8pt; font-weight:600;")
         lay.addWidget(mark)
         lay.addWidget(dot)
@@ -325,6 +326,9 @@ class MainWindow(QMainWindow):
         lp.btn_pause.toggled.connect(self._pause)
         lp.btn_stop.clicked.connect(self.stop_job)
         lp.btn_egv.clicked.connect(self.export_egv)
+        self._sync_speeds()
+        lp.engrave_speed.valueChanged.connect(self._speeds_edited)
+        lp.cut_speed.valueChanged.connect(self._speeds_edited)
         cp = self.camera_panel
         cp.btn_toggle.toggled.connect(self._toggle_camera)
         cp.show_underlay.toggled.connect(self._camera_visibility)
@@ -854,6 +858,18 @@ class MainWindow(QMainWindow):
         self.lbl_laser.setText("Лазер: " + text)
         self.statusBar().showMessage(text, 5000)
 
+    def _sync_speeds(self) -> None:
+        lp = self.laser_panel
+        for box, value in ((lp.engrave_speed, self.settings.engrave_speed), (lp.cut_speed, self.settings.cut_speed)):
+            box.blockSignals(True)
+            box.setValue(value)
+            box.blockSignals(False)
+
+    def _speeds_edited(self) -> None:
+        self.settings.engrave_speed = self.laser_panel.engrave_speed.value()
+        self.settings.cut_speed = self.laser_panel.cut_speed.value()
+        self.settings.save()
+
     def _jog(self, dx: int, dy: int) -> None:
         step = mm_to_steps(self.laser_panel.jog_step.currentData())
         self.laser.submit("move", (dx * step, dy * step))
@@ -1018,6 +1034,7 @@ class MainWindow(QMainWindow):
         dlg = SettingsDialog(self, self.settings)
         if dlg.exec():
             dlg.apply()
+            self._sync_speeds()
             self.laser.board = self.settings.board
             self.scene.update_bed()
             self.a_snap_grid.setChecked(self.settings.snap_grid)
