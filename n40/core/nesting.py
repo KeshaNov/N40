@@ -22,7 +22,10 @@ from shapely.geometry import Polygon, box
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
-from .geometry import Contours, fill_polygon_holes, iter_polygons, to_shapely
+from .geometry import Contours, fill_polygon_holes, iter_polygons, outline_geometry
+
+
+SIMPLIFY_TOL = 0.05  # мм, упрощение форм для раскладки
 
 
 class NestCancelled(Exception):
@@ -88,7 +91,12 @@ def nest(parts: list[NestPart], params: NestParams,
 
     jobs = []
     for part in parts:
-        geom = to_shapely(part.contours, fill_holes=not params.use_holes)
+        geom = outline_geometry(part.contours)
+        if not params.use_holes:
+            geom = fill_polygon_holes(geom)
+        # для раскладки хватает точности 0.05 мм: сплайны из CAD дают десятки тысяч вершин,
+        # и каждая проверка позиции становится в разы медленнее
+        geom = geom.simplify(SIMPLIFY_TOL, preserve_topology=True)
         if geom.is_empty:
             continue
         for i in range(max(1, part.copies)):
@@ -139,7 +147,7 @@ def nest(parts: list[NestPart], params: NestParams,
             blocker = blocker.buffer(params.gap, join_style=2)
         if not params.use_holes:
             blocker = fill_polygon_holes(blocker)
-        free = free.difference(blocker)
+        free = free.difference(blocker.simplify(SIMPLIFY_TOL, preserve_topology=True))
         b = affinity.translate(rot, dx, dy).bounds
         envelope = b if envelope is None else (min(envelope[0], b[0]), min(envelope[1], b[1]),
                                                max(envelope[2], b[2]), max(envelope[3], b[3]))

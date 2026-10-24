@@ -200,6 +200,87 @@ def offset(contours: Contours, delta: float, join: str = "round") -> Contours:
     return [Contour(np.array(pyclipper.scale_from_clipper(p, _CLIPPER_SCALE)), True) for p in result]
 
 
+# --------------------------------------------------------------------------- сшивка контуров
+
+def join_contours(contours: Contours, tol: float = 0.02) -> Contours:
+    """Сшивает открытые ломаные с совпадающими концами (в пределах tol мм) в цепочки.
+
+    CAD-программы (например, КОМПАС-3D) экспортируют контур детали как набор отдельных
+    отрезков и сплайнов. Цепочка, конец которой совпал с началом, становится замкнутым контуром.
+    """
+    closed = [c for c in contours if c.closed]
+    open_ = [c.points for c in contours if not c.closed and len(c.points) >= 2]
+    if not open_:
+        return list(contours)
+
+    def key(p):
+        return int(round(p[0] / tol)), int(round(p[1] / tol))
+
+    ends: dict[tuple[int, int], set[int]] = {}
+    for i, pts in enumerate(open_):
+        for p in (pts[0], pts[-1]):
+            ends.setdefault(key(p), set()).add(i)
+
+    def find(p, used):
+        kx, ky = key(p)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for j in ends.get((kx + dx, ky + dy), ()):
+                    if j in used:
+                        continue
+                    pts = open_[j]
+                    if np.hypot(*(pts[0] - p)) <= tol:
+                        return j, pts
+                    if np.hypot(*(pts[-1] - p)) <= tol:
+                        return j, pts[::-1]
+        return None
+
+    used: set[int] = set()
+    out = list(closed)
+    for i in range(len(open_)):
+        if i in used:
+            continue
+        used.add(i)
+        chain = [open_[i]]
+        for forward in (True, False):  # наращиваем цепочку с конца, затем с начала
+            while True:
+                tip = chain[-1][-1] if forward else chain[0][0]
+                if len(chain) > 1 or len(chain[0]) > 2:
+                    head = chain[0][0] if forward else chain[-1][-1]
+                    if np.hypot(*(tip - head)) <= tol:
+                        break  # цепочка замкнулась
+                hit = find(tip, used)
+                if hit is None:
+                    break
+                j, pts = hit
+                used.add(j)
+                if forward:
+                    chain.append(pts[1:])
+                else:
+                    chain.insert(0, pts[::-1][:-1])
+        pts = np.vstack(chain)
+        is_closed = len(pts) > 3 and np.hypot(*(pts[0] - pts[-1])) <= tol
+        out.append(Contour(pts[:-1] if is_closed else pts, is_closed))
+    return out
+
+
+def outline_geometry(contours: Contours) -> BaseGeometry:
+    """Площадная форма объекта для раскладки: замкнутые контуры плюс открытые линии
+    (осевые, штриховка); если замкнутых нет совсем (только линии, например гравировка) —
+    выпуклая оболочка всех точек."""
+    geom = to_shapely(contours)
+    if not geom.is_empty and geom.area > 1e-6:
+        lines = [LineString(c.points).buffer(0.05, quad_segs=2) for c in contours
+                 if not c.closed and len(c.points) >= 2]
+        return unary_union([geom, *lines]) if lines else geom
+    pts = [c.points for c in contours if len(c.points)]
+    if not pts:
+        return Polygon()
+    from shapely.geometry import MultiPoint
+    hull = MultiPoint(np.vstack(pts)).convex_hull
+    return hull.buffer(0.05) if hull.area < 1e-6 else hull
+
+
 # --------------------------------------------------------------------------- misc
 
 def polygon_area(points: np.ndarray) -> float:

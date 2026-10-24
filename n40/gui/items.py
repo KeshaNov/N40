@@ -201,7 +201,10 @@ class VectorItem(N40Item, QGraphicsPathItem):
         stroker.setWidth(1.5)
         self._shape = stroker.createStroke(self.path())
         if any(c.closed for c in self.contours):
-            self._shape = self._shape.united(self.path())
+            # область захвата мышью = обводка + заливка замкнутых контуров. Без united():
+            # булева операция Qt на тысячах сегментов (сплайны из CAD) работает минутами
+            self._shape.addPath(self.path())
+            self._shape.setFillRule(Qt.FillRule.WindingFill)
 
     def local_rect(self) -> QRectF:
         return self.path().boundingRect()

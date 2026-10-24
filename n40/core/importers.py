@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from .geometry import Contour, Contours
+from .geometry import Contour, Contours, join_contours
 
 MM_PER_INCH = 25.4
 FLATTEN_TOL = 0.02  # мм
@@ -134,6 +134,7 @@ def import_svg(path: Path, opts: ImportOptions) -> list[ImportedObject]:
         warnings.append(f"Пропущено встроенных изображений: {images}")
     if not contours:
         raise ImportError_("В SVG не найдено векторных контуров")
+    contours = join_contours(contours)
     return [ImportedObject(path.stem, "vector", contours, warnings=warnings)]
 
 
@@ -186,6 +187,7 @@ def import_dxf(path: Path, opts: ImportOptions) -> list[ImportedObject]:
             contours.append(Contour(pts * k, closed))
     if not contours:
         raise ImportError_("В DXF не найдено поддерживаемых примитивов")
+    contours = join_contours(contours)
     # DXF: ось Y вверх -> переворачиваем
     maxy = max(c.points[:, 1].max() for c in contours)
     for c in contours:

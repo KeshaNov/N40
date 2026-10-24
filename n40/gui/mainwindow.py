@@ -955,7 +955,7 @@ class MainWindow(QMainWindow):
             return
         s = self.settings
         gap = s.arrange_gap
-        params = NestParams(sheet_width=s.bed_width, sheet_height=s.bed_height, gap=gap, margin=gap,
+        params = NestParams(sheet_width=s.bed_width, sheet_height=s.bed_height, gap=gap, margin=0.0,
                             angles=[0.0, 90.0, 180.0, 270.0] if s.arrange_rotate else [0.0], use_holes=True)
         regions = [it for it in self.scene.n40_items() if isinstance(it, RegionItem) and not it.forbidden]
         forbidden = [it for it in self.scene.n40_items() if isinstance(it, RegionItem) and it.forbidden]
@@ -980,9 +980,16 @@ class MainWindow(QMainWindow):
         msg = f"Авторасстановка: размещено {len(result.placements)}, K = {result.utilization:.1f} %"
         if result.unplaced:
             msg += f", не поместилось {len(result.unplaced)} — оставлены на месте"
+            s = self.settings
+            names = []
+            for item, _copy in result.unplaced[:8]:
+                w, h = item.world_rect().width(), item.world_rect().height()
+                names.append(f"• {item.name} — {w:.1f} × {h:.1f} мм")
             QMessageBox.warning(self, "Авторасстановка",
-                                f"Не поместилось объектов: {len(result.unplaced)}.\n"
-                                "Они оставлены на прежнем месте и могут перекрываться с остальными. "
+                                f"Не поместилось объектов: {len(result.unplaced)}\n" + "\n".join(names) +
+                                f"\n\nРабочее поле: {s.bed_width:g} × {s.bed_height:g} мм "
+                                "(меняется в «Файл → Настройки → Станок»).\n"
+                                "Эти объекты оставлены на прежнем месте и могут перекрываться с остальными. "
                                 "Уменьшите зазор, разрешите вращение или освободите место на поле.")
         self.statusBar().showMessage(msg, 6000)
 
