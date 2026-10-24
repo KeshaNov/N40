@@ -108,6 +108,32 @@ QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
 QLabel#Title {{ font-size: 20pt; font-weight: 800; letter-spacing: -1px; }}
 QLabel#Caption {{ color: {GREY}; text-transform: uppercase; letter-spacing: 1px; font-size: 8pt; }}
 QLabel#Big {{ font-size: 22pt; font-weight: 800; }}
+QLabel#State {{ font-size: 12pt; font-weight: 800; }}
+
+/* левая колонка: разделы как в Bambu Studio */
+QScrollArea#Sidebar, QWidget#SidebarBody {{ background: {PAPER}; border: none; }}
+QPushButton#SectionHeader {{ background: {INK}; color: {PAPER}; border: none; padding: 7px 12px; margin: 0;
+                             font-weight: 700; letter-spacing: 2px; text-align: left; }}
+QPushButton#SectionHeader:hover {{ background: #2A2A2A; }}
+QPushButton#SectionHeader:pressed {{ background: {INK}; }}
+QPushButton#Square {{ padding: 0; min-width: 30px; max-width: 30px; min-height: 26px; font-size: 12pt; }}
+QPushButton#Jog, QPushButton#JogHome {{ padding: 0; font-size: 16pt; font-weight: 400; }}
+QPushButton#JogHome {{ background: {INK}; color: {PAPER}; }}
+QPushButton#JogHome:hover {{ background: #333; }}
+QPushButton#Step {{ padding: 0; font-weight: 600; }}
+QPushButton#Step:checked {{ background: {INK}; color: {PAPER}; }}
+
+/* шапка: управление заданием */
+QPushButton#HeaderButton {{ background: transparent; color: {PAPER}; border: 1px solid {GREY}; padding: 4px 14px; }}
+QPushButton#HeaderButton:hover {{ border-color: {PAPER}; }}
+QPushButton#HeaderButton:checked {{ background: {PAPER}; color: {INK}; }}
+QPushButton#HeaderStop {{ background: {RED}; color: white; border: none; padding: 4px 16px; }}
+QPushButton#HeaderStop:hover {{ background: #C02615; }}
+QPushButton#HeaderStart {{ background: {YELLOW}; color: {INK}; border: none; padding: 4px 22px; font-weight: 800; }}
+QPushButton#HeaderStart:hover {{ background: #FFD24A; }}
+QProgressBar#HeaderProgress {{ border: 1px solid {GREY}; background: transparent; max-height: 6px; }}
+QLabel#HeaderInfo {{ color: {GREY}; }}
+QToolBar#Actions QToolButton {{ padding: 4px; }}
 """
 
 
@@ -261,6 +287,14 @@ def make_icon(name: str) -> QIcon:
             p.drawLine(QPointF(5, 5), QPointF(17, 17)); p.drawLine(QPointF(17, 5), QPointF(5, 17))
         elif name == "duplicate":
             p.drawRect(QRectF(3, 3, 11, 11)); p.setBrush(color); p.drawRect(QRectF(8, 8, 11, 11))
+        elif name == "gear":
+            import math
+            for k in range(8):
+                a = k * math.pi / 4
+                p.drawLine(QPointF(11 + 6 * math.cos(a), 11 + 6 * math.sin(a)),
+                           QPointF(11 + 9 * math.cos(a), 11 + 9 * math.sin(a)))
+            p.drawEllipse(QPointF(11, 11), 6, 6)
+            p.drawEllipse(QPointF(11, 11), 2.2, 2.2)
         elif name == "copy":
             p.drawRect(QRectF(3, 3, 11, 11)); p.drawRect(QRectF(8, 8, 11, 11))
         elif name == "cut":

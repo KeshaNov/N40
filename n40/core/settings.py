@@ -24,8 +24,21 @@ class CameraCalibration:
     rms: float | None = None
 
 
+CUSTOM_MODEL = "Пользовательский"
+
+# Модели лазера: название -> (плата контроллера, ширина поля, высота поля), мм
+LASER_MODELS: dict[str, tuple[str, float, float]] = {
+    "K40 · M2 Nano · 300×200": ("M2", 300.0, 200.0),
+    "K40 · M2 Nano · 320×220": ("M2", 320.0, 220.0),
+    "K40 · M2 Nano · 400×300": ("M2", 400.0, 300.0),
+    "K40 · M1 / M · 300×200": ("M1", 300.0, 200.0),
+    "K40 · B2 · 300×200": ("B2", 300.0, 200.0),
+}
+
+
 @dataclass
 class Settings:
+    laser_model: str = "K40 · M2 Nano · 300×200"
     # Рабочее поле, мм
     bed_width: float = 300.0
     bed_height: float = 200.0

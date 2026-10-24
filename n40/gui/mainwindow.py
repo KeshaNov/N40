@@ -11,8 +11,8 @@ from pathlib import Path
 from PySide6.QtCore import QMimeData, QPointF, QSettings, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QCursor, QImage, QKeySequence
 from PySide6.QtWidgets import (QApplication, QCheckBox, QDoubleSpinBox, QFileDialog, QFormLayout, QHBoxLayout,
-                               QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QToolButton, QWidgetAction,
-                               QSplitter, QTabWidget, QToolBar, QVBoxLayout, QWidget)
+                               QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QScrollArea, QSizePolicy,
+                               QSplitter, QToolBar, QToolButton, QVBoxLayout, QWidget, QWidgetAction)
 
 from .. import APP_NAME, __version__
 from ..core import geometry as geo
@@ -21,7 +21,7 @@ from ..core.driver import lhymicro
 from ..core.importers import ALL_EXT, RASTER_EXT, ImportError_, import_file
 from ..core.nesting import NestParams, NestPart
 from ..core.planner import mm_to_steps
-from ..core.settings import Settings
+from ..core.settings import CUSTOM_MODEL, LASER_MODELS, Settings
 from . import style
 from .calibration import CalibrationWizard
 from .dialogs import (ArrayDialog, ImportDialog, NestDialog, OffsetDialog, SettingsDialog, TextDialog,
@@ -29,7 +29,8 @@ from .dialogs import (ArrayDialog, ImportDialog, NestDialog, OffsetDialog, Setti
 from .items import (N40Item, RasterItem, RegionItem, VectorItem, clone_from_dict, clone_item, item_from_dict,
                     items_bbox, qimage_to_pil)
 from .jobbuilder import build_operations
-from .panels import CameraPanel, LaserPanel, ObjectsPanel, PropertiesPanel, spin
+from .panels import (CameraPanel, JobBar, JogPanel, MachinePanel, ObjectsPanel, PropertiesPanel, Section,
+                     SpeedPanel, spin)
 from .workers import CameraWorker, LaserWorker, NestWorker, UpdateWorker
 from .workspace import WorkArea, WorkScene
 
@@ -75,43 +76,40 @@ class MainWindow(QMainWindow):
         self.area = WorkArea(self.scene, self.settings)
         self.view = self.area.view
 
+        # Раскладка как в Bambu Studio: шапка с заданием, панель функций сверху,
+        # слева колонка настроек (станок → скорость → перемещение → объекты → свойства → камера)
+        self.machine = MachinePanel(self.settings)
+        self.speeds = SpeedPanel()
+        self.jog = JogPanel()
         self.objects = ObjectsPanel(self.scene)
         self.props = PropertiesPanel(self.scene, self.settings)
-        self.laser_panel = LaserPanel()
         self.camera_panel = CameraPanel(self.settings)
-        self.tabs = QTabWidget()
-        self.tabs.addTab(self.objects, "ОБЪЕКТЫ")
-        self.tabs.addTab(self.props, "СВОЙСТВА")
-        self.tabs.addTab(self.laser_panel, "ЛАЗЕР")
-        self.tabs.addTab(self.camera_panel, "КАМЕРА")
-        self.tabs.setMinimumWidth(320)
-        self.tabs.setCurrentWidget(self.laser_panel)
+        self.job = JobBar()
 
-        header = self._build_header()
+        self._build_actions()
+        self._build_menus()
         center = QWidget()
         cl = QVBoxLayout(center)
         cl.setContentsMargins(0, 0, 0, 0)
         cl.setSpacing(0)
-        cl.addWidget(header)
+        cl.addWidget(self._build_header())
+        cl.addWidget(self._build_toolbar())
         splitter = QSplitter()
+        splitter.addWidget(self._build_sidebar())
         splitter.addWidget(self.area)
-        splitter.addWidget(self.tabs)
-        splitter.setStretchFactor(0, 1)
-        splitter.setSizes([1000, 340])
+        splitter.setStretchFactor(1, 1)
+        splitter.setCollapsible(0, False)
+        splitter.setSizes([350, 1050])
         splitter.setHandleWidth(2)
         splitter.setStyleSheet(f"QSplitter::handle {{ background: {style.INK}; }}")
         cl.addWidget(splitter, 1)
         self.setCentralWidget(center)
-
-        self._build_actions()
-        self._build_menus()
-        self._build_toolbars()
         self._build_status()
 
         self.laser = LaserWorker(self.settings.board)
         self.laser.status.connect(self._laser_status)
         self.laser.connected_changed.connect(self._laser_connected)
-        self.laser.progress.connect(lambda a, b: self.laser_panel.progress.setValue(int(a / max(b, 1) * 100)))
+        self.laser.progress.connect(lambda a, b: self.job.progress.setValue(int(a / max(b, 1) * 100)))
         self.laser.job_finished.connect(self._job_finished)
         self.laser.start()
         self._wire_panels()
@@ -141,10 +139,13 @@ class MainWindow(QMainWindow):
     # ================================================================== построение UI
     def _build_header(self) -> QWidget:
         w = QWidget()
-        w.setStyleSheet(f"background:{style.INK};")
-        w.setFixedHeight(46)
+        w.setObjectName("Header")
+        w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # селектор по имени, иначе фон шапки перекроет стили кнопок задания
+        w.setStyleSheet(f"QWidget#Header {{ background: {style.INK}; }}")
+        w.setFixedHeight(48)
         lay = QHBoxLayout(w)
-        lay.setContentsMargins(14, 0, 14, 0)
+        lay.setContentsMargins(14, 0, 10, 0)
         mark = QLabel("N40")
         mark.setStyleSheet(f"color:{style.PAPER}; font-size:20pt; font-weight:900; letter-spacing:-1px;")
         dot = QLabel("●")
@@ -159,7 +160,35 @@ class MainWindow(QMainWindow):
         self.header_job = QLabel("")
         self.header_job.setStyleSheet(f"color:{style.YELLOW}; font-weight:700; letter-spacing:1px;")
         lay.addWidget(self.header_job)
+        lay.addSpacing(12)
+        lay.addWidget(self.job)
         return w
+
+    def _build_sidebar(self) -> QScrollArea:
+        """Левая колонка настроек в порядке Bambu Studio: сверху станок, ниже объекты."""
+        body = QWidget()
+        body.setObjectName("SidebarBody")
+        lay = QVBoxLayout(body)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self.sections = {
+            "machine": Section("Станок", self.machine),
+            "speed": Section("Скорость", self.speeds),
+            "jog": Section("Перемещение", self.jog),
+            "objects": Section("Объекты", self.objects),
+            "props": Section("Свойства объекта", self.props),
+            "camera": Section("Камера", self.camera_panel, expanded=False),
+        }
+        for sec in self.sections.values():
+            lay.addWidget(sec)
+        lay.addStretch(1)
+        scroll = QScrollArea()
+        scroll.setObjectName("Sidebar")
+        scroll.setWidget(body)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setMinimumWidth(330)
+        return scroll
 
     def _act(self, text, slot=None, shortcut=None, icon=None, checkable=False, tip=None) -> QAction:
         a = QAction(text, self)
@@ -299,29 +328,42 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_updates)
         m.addAction(self.a_about)
 
-    def _build_toolbars(self) -> None:
-        tools = QToolBar("Инструменты")
-        tools.setObjectName("Tools")
-        tools.setMovable(False)
-        tools.setOrientation(Qt.Orientation.Vertical)
+    def _build_toolbar(self) -> QToolBar:
+        """Панель функций над рабочим полем: импорт, примитивы, правка, преобразования, авторасстановка."""
+        bar = QToolBar("Функции")
+        bar.setObjectName("Actions")
+        bar.setMovable(False)
+        for a in (self.a_import, None, self.a_undo, self.a_redo, None):
+            bar.addSeparator() if a is None else bar.addAction(a)
         for key, a in self.tool_actions.items():
-            tools.addAction(a)
+            bar.addAction(a)
             if key in ("select", "text"):
-                tools.addSeparator()
-        self.addToolBar(Qt.ToolBarArea.LeftToolBarArea, tools)
+                bar.addSeparator()
+        bar.addSeparator()
+        for a in (self.a_dup, self.a_del, None, self.a_rot_ccw, self.a_rot_cw, self.a_flip_h, self.a_flip_v):
+            bar.addSeparator() if a is None else bar.addAction(a)
+        bar.addWidget(self._dropdown("align_left", "Выравнивание и распределение",
+                                     [*self.align_actions.values(), None, self.a_dist_h, self.a_dist_v]))
+        bar.addSeparator()
+        for a in (self.a_group, self.a_ungroup):
+            bar.addAction(a)
+        bar.addWidget(self._dropdown("union", "Булевы операции", [self.a_union, self.a_diff, self.a_inter]))
+        for a in (self.a_array, self.a_offset):
+            bar.addAction(a)
+        bar.addSeparator()
+        bar.addWidget(self._build_arrange_button())
+        return bar
 
-        act = QToolBar("Действия")
-        act.setObjectName("Actions")
-        act.setMovable(False)
-        for a in (self.a_import, None, self.a_undo, self.a_redo, None, self.a_cut, self.a_copy, self.a_paste,
-                  self.a_dup, self.a_del, None,
-                  self.a_rot_ccw, self.a_rot_cw, self.a_flip_h, self.a_flip_v, None,
-                  *self.align_actions.values(), self.a_dist_h, self.a_dist_v, None,
-                  self.a_group, self.a_ungroup, None, self.a_union, self.a_diff, self.a_inter, None,
-                  self.a_array, self.a_offset, None):
-            act.addSeparator() if a is None else act.addAction(a)
-        act.addWidget(self._build_arrange_button())
-        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, act)
+    def _dropdown(self, icon: str, tip: str, actions: list) -> QToolButton:
+        btn = QToolButton()
+        btn.setIcon(style.make_icon(icon))
+        btn.setToolTip(tip)
+        btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(btn)
+        for a in actions:
+            menu.addSeparator() if a is None else menu.addAction(a)
+        btn.setMenu(menu)
+        return btn
 
     def _build_arrange_button(self) -> QToolButton:
         """Кнопка «Авторасстановка»: щелчок — разложить, стрелка — настройки."""
@@ -371,20 +413,20 @@ class MainWindow(QMainWindow):
         sb.addPermanentWidget(self.lbl_laser)
 
     def _wire_panels(self) -> None:
-        lp = self.laser_panel
-        lp.btn_connect.clicked.connect(self._toggle_connect)
-        lp.btn_home.clicked.connect(lambda: self.laser.submit("home"))
-        lp.btn_unlock.clicked.connect(lambda: self.laser.submit("unlock"))
-        for key, (dx, dy) in {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}.items():
-            lp.jog[key].clicked.connect(lambda _=False, dx=dx, dy=dy: self._jog(dx, dy))
-        lp.btn_frame.clicked.connect(self.frame_job)
-        lp.btn_start.clicked.connect(self.start_job)
-        lp.btn_pause.toggled.connect(self._pause)
-        lp.btn_stop.clicked.connect(self.stop_job)
-        lp.btn_egv.clicked.connect(self.export_egv)
+        self.machine.btn_connect.clicked.connect(self._toggle_connect)
+        self.machine.btn_settings.clicked.connect(self.open_settings)
+        self.machine.model.currentTextChanged.connect(self._model_chosen)
+        self.jog.btn_home.clicked.connect(lambda: self.laser.submit("home"))
+        self.jog.btn_unlock.clicked.connect(lambda: self.laser.submit("unlock"))
+        for (dx, dy), btn in self.jog.jog.items():
+            btn.clicked.connect(lambda _=False, dx=dx, dy=dy: self._jog(dx, dy))
+        self.job.btn_frame.clicked.connect(self.frame_job)
+        self.job.btn_start.clicked.connect(self.start_job)
+        self.job.btn_pause.toggled.connect(self._pause)
+        self.job.btn_stop.clicked.connect(self.stop_job)
         self._sync_speeds()
-        lp.engrave_speed.valueChanged.connect(self._speeds_edited)
-        lp.cut_speed.valueChanged.connect(self._speeds_edited)
+        for box in (self.speeds.engrave_speed, self.speeds.cut_speed, self.speeds.raster_speed):
+            box.valueChanged.connect(self._speeds_edited)
         cp = self.camera_panel
         cp.btn_toggle.toggled.connect(self._toggle_camera)
         cp.show_underlay.toggled.connect(self._camera_visibility)
@@ -875,7 +917,6 @@ class MainWindow(QMainWindow):
                 added.append(item)
         self._after_edit()
         if added:
-            self.tabs.setCurrentWidget(self.objects)
             self.statusBar().showMessage(f"Импортировано объектов: {len(added)}", 4000)
         if errors or warnings:
             QMessageBox.warning(self, "Импорт", "\n".join(errors + warnings))
@@ -1066,40 +1107,60 @@ class MainWindow(QMainWindow):
             self.laser.submit("connect")
 
     def _laser_connected(self, ok: bool) -> None:
-        lp = self.laser_panel
-        lp.btn_connect.setText("Отключить" if ok else "Подключить")
-        lp.state.setText("Подключён" if ok else "Не подключён")
+        self.machine.btn_connect.setText("Отключить" if ok else "Подключить")
+        self.machine.state.setText("Подключён" if ok else "Не подключён")
 
     def _laser_status(self, text: str) -> None:
         self.lbl_laser.setText("Лазер: " + text)
         self.statusBar().showMessage(text, 5000)
 
     def _sync_speeds(self) -> None:
-        lp = self.laser_panel
-        for box, value in ((lp.engrave_speed, self.settings.engrave_speed), (lp.cut_speed, self.settings.cut_speed)):
+        sp, s = self.speeds, self.settings
+        for box, value in ((sp.engrave_speed, s.engrave_speed), (sp.cut_speed, s.cut_speed),
+                           (sp.raster_speed, s.raster_speed)):
             box.blockSignals(True)
             box.setValue(value)
             box.blockSignals(False)
 
     def _speeds_edited(self) -> None:
-        self.settings.engrave_speed = self.laser_panel.engrave_speed.value()
-        self.settings.cut_speed = self.laser_panel.cut_speed.value()
+        self.settings.engrave_speed = self.speeds.engrave_speed.value()
+        self.settings.cut_speed = self.speeds.cut_speed.value()
+        self.settings.raster_speed = self.speeds.raster_speed.value()
         self.settings.save()
 
+    def _model_chosen(self, name: str) -> None:
+        """Выбор модели лазера: подставляет плату и размер поля из пресета."""
+        s = self.settings
+        s.laser_model = name
+        if name in LASER_MODELS:
+            s.board, s.bed_width, s.bed_height = LASER_MODELS[name]
+        elif name == CUSTOM_MODEL:
+            self.open_settings()
+        s.save()
+        self._apply_machine_settings()
+
+    def _apply_machine_settings(self) -> None:
+        self.laser.board = self.settings.board
+        self.scene.update_bed()
+        self.machine.show_settings(self.settings)
+        self.view.zoom_fit()
+        if self.camera:
+            self.camera.reload_calibration()
+
     def _jog(self, dx: int, dy: int) -> None:
-        step = mm_to_steps(self.laser_panel.jog_step.currentData())
+        step = mm_to_steps(self.jog.step_mm)
         self.laser.submit("move", (dx * step, dy * step))
 
     def _pause(self, paused: bool) -> None:
         self.laser.set_paused(paused)
-        self.laser_panel.btn_pause.setText("Продолжить" if paused else "Пауза")
+        self.job.btn_pause.setText("Продолжить" if paused else "Пауза")
 
     def stop_job(self) -> None:
         self.laser.request_stop()
-        self.laser_panel.btn_pause.setChecked(False)
+        self.job.btn_pause.setChecked(False)
 
     def build_programs(self):
-        items = self.selected() if self.laser_panel.only_selected.isChecked() else self.scene.n40_items()
+        items = self.selected() if self.objects.only_selected.isChecked() else self.scene.n40_items()
         ops = build_operations(items, self.settings)
         programs = planner.plan(ops)
         if not programs:
@@ -1125,13 +1186,13 @@ class MainWindow(QMainWindow):
         if not programs:
             return
         t = planner.estimate_time(programs)
-        self.laser_panel.estimate.setText(f"Оценка времени ≈ {t / 60:.1f} мин")
+        self.job.estimate.setText(f"Оценка времени ≈ {t / 60:.1f} мин")
         if QMessageBox.question(self, "Старт",
                                 f"Блоков: {len(programs)}, оценка времени ≈ {t / 60:.1f} мин.\n"
                                 "Крышка закрыта, вытяжка и охлаждение включены?") \
                 != QMessageBox.StandardButton.Yes:
             return
-        self.laser_panel.progress.setValue(0)
+        self.job.progress.setValue(0)
         self.header_job.setText("ИДЁТ ЗАДАНИЕ")
         self.laser.submit("job", programs)
         if self.settings.rapid_return_home:
@@ -1139,9 +1200,9 @@ class MainWindow(QMainWindow):
 
     def _job_finished(self, ok: bool, msg: str) -> None:
         self.header_job.setText("")
-        self.laser_panel.btn_pause.setChecked(False)
+        self.job.btn_pause.setChecked(False)
         if ok:
-            self.laser_panel.progress.setValue(100)
+            self.job.progress.setValue(100)
         self._laser_status(msg)
 
     def frame_job(self) -> None:
@@ -1250,15 +1311,17 @@ class MainWindow(QMainWindow):
         dlg = SettingsDialog(self, self.settings)
         if dlg.exec():
             dlg.apply()
+            s = self.settings
+            # поле или плата изменены вручную и не совпадают с пресетом -> «Пользовательский»
+            if LASER_MODELS.get(s.laser_model) != (s.board, s.bed_width, s.bed_height):
+                s.laser_model = CUSTOM_MODEL
+                s.save()
             self._sync_speeds()
-            self.laser.board = self.settings.board
-            self.scene.update_bed()
-            self.a_snap_grid.setChecked(self.settings.snap_grid)
-            self.a_snap_nodes.setChecked(self.settings.snap_nodes)
+            self._apply_machine_settings()
+            self.a_snap_grid.setChecked(s.snap_grid)
+            self.a_snap_nodes.setChecked(s.snap_nodes)
             for a, v in zip(self.grid_actions, (1, 5, 10)):
-                a.setChecked(abs(self.settings.grid_step - v) < 1e-6)
-            if self.camera:
-                self.camera.reload_calibration()
+                a.setChecked(abs(s.grid_step - v) < 1e-6)
 
     def check_updates(self, manual: bool = False) -> None:
         self._upd = UpdateWorker()

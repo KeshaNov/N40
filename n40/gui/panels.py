@@ -1,14 +1,16 @@
-"""Боковые панели: объекты, свойства, лазер, камера."""
+"""Панели левой колонки (станок, скорость, перемещение, объекты, свойства, камера) и шапки."""
 
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGridLayout, QGroupBox,
-                               QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QProgressBar, QPushButton,
-                               QSlider, QSpinBox, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGridLayout,
+                               QGroupBox, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QProgressBar,
+                               QPushButton, QSizePolicy, QSlider, QSpinBox, QToolButton, QVBoxLayout, QWidget)
 
+from ..core.settings import CUSTOM_MODEL, LASER_MODELS
 from .items import MODE_NAMES, N40Item, RasterItem, RegionItem, items_bbox
+from .style import make_icon
 
 
 def spin(lo=-10000.0, hi=10000.0, dec=2, suffix=" мм", step=1.0) -> QDoubleSpinBox:
@@ -42,10 +44,12 @@ class ObjectsPanel(QWidget):
         self.list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.list.itemSelectionChanged.connect(self._to_scene)
         self.list.itemChanged.connect(self._renamed)
+        self.list.setMinimumHeight(200)
+        self.only_selected = QCheckBox("Обрабатывать лазером только выделенные")
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(8, 8, 8, 8)
-        lay.addWidget(caption("Объекты проекта"))
-        lay.addWidget(self.list)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self.list, 1)
+        lay.addWidget(self.only_selected)
         self._syncing = False
 
     def refresh(self) -> None:
@@ -146,12 +150,11 @@ class PropertiesPanel(QWidget):
         self.info.setWordWrap(True)
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(10, 4, 10, 10)
+        lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.info)
         lay.addWidget(geo)
         lay.addWidget(laser)
         lay.addWidget(self.raster_box)
-        lay.addStretch(1)
 
         for s in (self.x, self.y):
             s.valueChanged.connect(self._apply_pos)
@@ -287,100 +290,196 @@ class PropertiesPanel(QWidget):
         self._done()
 
 
-class LaserPanel(QWidget):
-    """Управление станком: подключение, перемещение, задание."""
+class Section(QWidget):
+    """Сворачиваемый раздел левой панели (по образцу Bambu Studio)."""
+
+    def __init__(self, title: str, content: QWidget, expanded: bool = True):
+        super().__init__()
+        self.title = title.upper()
+        self.header = QPushButton()
+        self.header.setObjectName("SectionHeader")
+        self.header.setCheckable(True)
+        self.header.setChecked(expanded)
+        self.header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.header.toggled.connect(self._toggle)
+        self.body = QWidget()
+        self.body.setObjectName("Panel")
+        bl = QVBoxLayout(self.body)
+        bl.setContentsMargins(12, 10, 12, 14)
+        bl.addWidget(content)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self.header)
+        lay.addWidget(self.body)
+        self._toggle(expanded)
+
+    def _toggle(self, on: bool) -> None:
+        self.body.setVisible(on)
+        self.header.setText(("▾  " if on else "▸  ") + self.title)
+
+
+class MachinePanel(QWidget):
+    """Модель лазера и подключение."""
+
+    def __init__(self, settings):
+        super().__init__()
+        self.model = QComboBox()
+        for name in LASER_MODELS:
+            self.model.addItem(name)
+        self.model.addItem(CUSTOM_MODEL)
+        self.btn_settings = QPushButton()
+        self.btn_settings.setIcon(make_icon("gear"))
+        self.btn_settings.setObjectName("Square")
+        self.btn_settings.setToolTip("Параметры станка: поле, плата, скорости")
+        self.info = caption("")
+        self.state = QLabel("Не подключён")
+        self.state.setObjectName("State")
+        self.btn_connect = QPushButton("Подключить")
+        self.btn_connect.setObjectName("Primary")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        row = QHBoxLayout()
+        row.addWidget(self.model, 1)
+        row.addWidget(self.btn_settings)
+        lay.addLayout(row)
+        lay.addWidget(self.info)
+        row = QHBoxLayout()
+        row.addWidget(self.state, 1)
+        row.addWidget(self.btn_connect)
+        lay.addLayout(row)
+        self.show_settings(settings)
+
+    def show_settings(self, settings) -> None:
+        self.model.blockSignals(True)
+        idx = self.model.findText(settings.laser_model)
+        self.model.setCurrentIndex(idx if idx >= 0 else self.model.count() - 1)
+        self.model.blockSignals(False)
+        self.info.setText(f"Поле {settings.bed_width:g} × {settings.bed_height:g} мм · плата {settings.board}")
+
+
+class SpeedPanel(QWidget):
+    """Скорости по умолчанию для режимов обработки (объект может переопределить в «Свойствах»)."""
 
     def __init__(self):
         super().__init__()
-        self.setObjectName("Panel")
-        self.state = QLabel("Не подключён")
-        self.state.setObjectName("Big")
-        self.btn_connect = QPushButton("Подключить")
-        self.btn_connect.setObjectName("Primary")
-        self.btn_home = QPushButton("Домой")
-        self.btn_unlock = QPushButton("Разблокировать")
-        self.jog_step = QComboBox()
-        for v in ("0.1", "1", "5", "10", "50"):
-            self.jog_step.addItem(f"{v} мм", float(v))
-        self.jog_step.setCurrentIndex(2)
-        self.jog = {}
-        grid = QGridLayout()
-        for key, (r, c, text) in {"up": (0, 1, "↑"), "left": (1, 0, "←"), "right": (1, 2, "→"),
-                                  "down": (2, 1, "↓")}.items():
-            b = QPushButton(text)
-            b.setFixedSize(44, 36)
-            self.jog[key] = b
-            grid.addWidget(b, r, c)
-        grid.addWidget(self.jog_step, 1, 1)
-
-        # скорости по умолчанию для векторных режимов (объект может переопределить в «Свойствах»)
         self.engrave_speed = spin(1, 500, 1, " мм/с", 1)
         self.cut_speed = spin(1, 500, 1, " мм/с", 1)
-        self.engrave_speed.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.UpDownArrows)
-        self.cut_speed.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.UpDownArrows)
+        self.raster_speed = spin(1, 500, 1, " мм/с", 1)
+        for s in (self.engrave_speed, self.cut_speed, self.raster_speed):
+            s.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.UpDownArrows)
+        form = QFormLayout(self)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.addRow("Гравировка контура", self.engrave_speed)
+        form.addRow("Резка", self.cut_speed)
+        form.addRow("Растровая гравировка", self.raster_speed)
+        note = QLabel("Мощность K40 задаётся ручкой на панели станка.")
+        note.setObjectName("Caption")
+        note.setWordWrap(True)
+        form.addRow(note)
 
+
+# направление (dx, dy) -> подпись; Y вниз, как у K40
+JOG_DIRECTIONS = {(-1, -1): "↖", (0, -1): "↑", (1, -1): "↗",
+                  (-1, 0): "←", (1, 0): "→",
+                  (-1, 1): "↙", (0, 1): "↓", (1, 1): "↘"}
+JOG_STEPS = (0.1, 1.0, 5.0, 10.0, 50.0)
+JOG_BUTTON = 52  # все кнопки перемещения одного размера
+
+
+class JogPanel(QWidget):
+    """Перемещение головы: симметричная сетка 3×3 (в центре — «Домой») и шаг."""
+
+    def __init__(self):
+        super().__init__()
+        self.jog: dict[tuple[int, int], QPushButton] = {}
+        grid = QGridLayout()
+        grid.setSpacing(6)
+        for (dx, dy), text in JOG_DIRECTIONS.items():
+            b = QPushButton(text)
+            b.setObjectName("Jog")
+            b.setFixedSize(JOG_BUTTON, JOG_BUTTON)
+            grid.addWidget(b, dy + 1, dx + 1)
+            self.jog[(dx, dy)] = b
+        self.btn_home = QPushButton("⌂")
+        self.btn_home.setObjectName("JogHome")
+        self.btn_home.setToolTip("Домой (левый верхний угол)")
+        self.btn_home.setFixedSize(JOG_BUTTON, JOG_BUTTON)
+        grid.addWidget(self.btn_home, 1, 1)
+
+        steps = QHBoxLayout()
+        steps.setSpacing(6)
+        self.step_group = QButtonGroup(self)
+        self.step_group.setExclusive(True)
+        for i, v in enumerate(JOG_STEPS):
+            b = QPushButton(f"{v:g}")
+            b.setObjectName("Step")
+            b.setCheckable(True)
+            b.setFixedSize(JOG_BUTTON, 30)
+            self.step_group.addButton(b, i)
+            steps.addWidget(b)
+        self.step_group.button(JOG_STEPS.index(5.0)).setChecked(True)
+
+        self.btn_unlock = QPushButton("Разблокировать каретку")
+        self.btn_unlock.setToolTip("Отключить моторы, чтобы двигать голову рукой")
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
+        lay.addLayout(self._centered(grid))
+        lay.addWidget(caption("Шаг, мм"), 0, Qt.AlignmentFlag.AlignHCenter)
+        lay.addLayout(self._centered(steps))
+        lay.addWidget(self.btn_unlock)
+
+    @staticmethod
+    def _centered(inner) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.addStretch(1)
+        row.addLayout(inner)
+        row.addStretch(1)
+        return row
+
+    @property
+    def step_mm(self) -> float:
+        return JOG_STEPS[max(0, self.step_group.checkedId())]
+
+
+class JobBar(QWidget):
+    """Управление заданием в шапке окна (как кнопка «Печать» в Bambu Studio)."""
+
+    def __init__(self):
+        super().__init__()
+        self.estimate = QLabel("")
+        self.estimate.setObjectName("HeaderInfo")
+        self.progress = QProgressBar()
+        self.progress.setObjectName("HeaderProgress")
+        self.progress.setFixedWidth(150)
+        self.progress.setTextVisible(False)
+        self.progress.setValue(0)
         self.btn_frame = QPushButton("Рамка")
         self.btn_frame.setToolTip("Обвести габарит задания без лазера")
-        self.btn_start = QPushButton("Старт")
-        self.btn_start.setObjectName("Primary")
         self.btn_pause = QPushButton("Пауза")
         self.btn_pause.setCheckable(True)
         self.btn_stop = QPushButton("Стоп")
-        self.btn_stop.setObjectName("Danger")
-        self.btn_egv = QPushButton("Экспорт EGV…")
-        self.only_selected = QCheckBox("Только выделенные объекты")
-        self.progress = QProgressBar()
-        self.progress.setValue(0)
-        self.estimate = QLabel("")
-        self.estimate.setObjectName("Caption")
-
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(10, 10, 10, 10)
-        lay.addWidget(caption("Станок"))
-        lay.addWidget(self.state)
-        row = QHBoxLayout()
-        row.addWidget(self.btn_connect)
-        lay.addLayout(row)
-        row = QHBoxLayout()
-        row.addWidget(self.btn_home)
-        row.addWidget(self.btn_unlock)
-        lay.addLayout(row)
-        jog_box = QGroupBox("Перемещение")
-        jl = QVBoxLayout(jog_box)
-        jl.addLayout(grid)
-        lay.addWidget(jog_box)
-        speeds = QGroupBox("Скорость")
-        sf = QFormLayout(speeds)
-        sf.addRow("Гравировка контура", self.engrave_speed)
-        sf.addRow("Резка", self.cut_speed)
-        lay.addWidget(speeds)
-        job = QGroupBox("Задание")
-        jv = QVBoxLayout(job)
-        jv.addWidget(self.only_selected)
-        r1 = QHBoxLayout()
-        r1.addWidget(self.btn_frame)
-        r1.addWidget(self.btn_egv)
-        jv.addLayout(r1)
-        r2 = QHBoxLayout()
-        r2.addWidget(self.btn_start)
-        r2.addWidget(self.btn_pause)
-        r2.addWidget(self.btn_stop)
-        jv.addLayout(r2)
-        jv.addWidget(self.progress)
-        jv.addWidget(self.estimate)
-        lay.addWidget(job)
-        note = QLabel("Мощность K40 задаётся ручкой на панели станка. "
-                      "Перед первым запуском проверьте задание на малой мощности.")
-        note.setWordWrap(True)
-        note.setObjectName("Caption")
-        lay.addWidget(note)
-        lay.addStretch(1)
+        self.btn_stop.setObjectName("HeaderStop")
+        self.btn_start = QPushButton("Старт")
+        self.btn_start.setObjectName("HeaderStart")
+        for b in (self.btn_frame, self.btn_pause):
+            b.setObjectName("HeaderButton")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
+        lay.addWidget(self.estimate)
+        lay.addWidget(self.progress)
+        lay.addSpacing(8)
+        for b in (self.btn_frame, self.btn_pause, self.btn_stop, self.btn_start):
+            b.setFixedHeight(30)
+            lay.addWidget(b)
 
 
 class CameraPanel(QWidget):
     def __init__(self, settings):
         super().__init__()
-        self.setObjectName("Panel")
         self.btn_toggle = QPushButton("Включить камеру")
         self.btn_toggle.setCheckable(True)
         self.btn_toggle.setObjectName("Primary")
@@ -396,17 +495,18 @@ class CameraPanel(QWidget):
         self.status.setWordWrap(True)
         self.status.setObjectName("Caption")
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(10, 10, 10, 10)
-        lay.addWidget(caption("Камера над полем"))
+        lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.btn_toggle)
         lay.addWidget(self.show_underlay)
         lay.addWidget(caption("Прозрачность"))
         lay.addWidget(self.opacity)
-        lay.addWidget(self.btn_freeze)
-        lay.addWidget(self.btn_calibrate)
+        row = QHBoxLayout()
+        row.addWidget(self.btn_freeze)
+        row.addWidget(self.btn_calibrate)
+        lay.addLayout(row)
         lay.addWidget(self.status)
         hint = QLabel("Раскрой по фото: включите камеру, обведите инструментом «Область раскроя» "
-                      "свободный участок обрезка (или отметьте «Запретные зоны»), затем запустите нестинг.")
+                      "свободный участок обрезка (или отметьте «Запретные зоны»), затем нажмите «Авторасстановка».")
         hint.setWordWrap(True)
+        hint.setObjectName("Caption")
         lay.addWidget(hint)
-        lay.addStretch(1)
