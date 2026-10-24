@@ -261,6 +261,13 @@ def make_icon(name: str) -> QIcon:
             p.drawLine(QPointF(5, 5), QPointF(17, 17)); p.drawLine(QPointF(17, 5), QPointF(5, 17))
         elif name == "duplicate":
             p.drawRect(QRectF(3, 3, 11, 11)); p.setBrush(color); p.drawRect(QRectF(8, 8, 11, 11))
+        elif name == "copy":
+            p.drawRect(QRectF(3, 3, 11, 11)); p.drawRect(QRectF(8, 8, 11, 11))
+        elif name == "cut":
+            p.drawEllipse(QRectF(3, 13, 6, 6)); p.drawEllipse(QRectF(13, 13, 6, 6))
+            p.drawLine(QPointF(8, 14), QPointF(16, 3)); p.drawLine(QPointF(14, 14), QPointF(6, 3))
+        elif name == "paste":
+            p.drawRect(QRectF(4, 5, 14, 15)); p.setBrush(color); p.drawRect(QRectF(8, 3, 6, 4))
         elif name == "undo":
             p.drawArc(QRectF(5, 6, 13, 12), 90 * 16, -200 * 16); poly(p, [(3, 9), (8, 5), (8, 12)])
         elif name == "redo":

@@ -248,8 +248,11 @@ class WorkView(QGraphicsView):
             self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
             return
         if self.tool == "select" or e.button() != Qt.MouseButton.LeftButton:
-            if e.button() == Qt.MouseButton.RightButton and self.tool != "select":
-                self._finish_poly()
+            if e.button() == Qt.MouseButton.RightButton:
+                # в режиме выделения правая кнопка открывает контекстное меню и не сбрасывает выделение
+                if self.tool != "select":
+                    self._finish_poly()
+                e.accept()
                 return
             super().mousePressEvent(e)
             return

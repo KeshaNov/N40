@@ -8,9 +8,10 @@ import math
 import subprocess
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QSettings, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence
-from PySide6.QtWidgets import (QFileDialog, QHBoxLayout, QInputDialog, QLabel, QMainWindow, QMessageBox,
+from PySide6.QtCore import QMimeData, QPointF, QSettings, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QAction, QActionGroup, QCursor, QImage, QKeySequence
+from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QMainWindow, QMenu,
+                               QMessageBox,
                                QSplitter, QTabWidget, QToolBar, QVBoxLayout, QWidget)
 
 from .. import APP_NAME, __version__
@@ -25,7 +26,8 @@ from . import style
 from .calibration import CalibrationWizard
 from .dialogs import (ArrayDialog, ImportDialog, NestDialog, OffsetDialog, SettingsDialog, TextDialog,
                       ask_update)
-from .items import N40Item, RasterItem, RegionItem, VectorItem, clone_item, item_from_dict, items_bbox
+from .items import (N40Item, RasterItem, RegionItem, VectorItem, clone_from_dict, clone_item, item_from_dict,
+                    items_bbox, qimage_to_pil)
 from .jobbuilder import build_operations
 from .panels import CameraPanel, LaserPanel, ObjectsPanel, PropertiesPanel
 from .workers import CameraWorker, LaserWorker, NestWorker, UpdateWorker
@@ -35,6 +37,7 @@ FILE_FILTER = ("Все поддерживаемые (*.svg *.dxf *.png *.jpg *.j
                "SVG (*.svg);;DXF (*.dxf);;Изображения (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff);;"
                "PDF / Illustrator (*.pdf *.ai)")
 PROJECT_FILTER = "Проект N40 (*.n40)"
+CLIPBOARD_MIME = "application/x-n40-items"  # объекты N40 в системном буфере обмена (JSON)
 
 
 class DownloadWorker(QThread):
@@ -120,6 +123,10 @@ class MainWindow(QMainWindow):
         self.view.view_changed.connect(self._update_zoom_label)
         self.view.tool_finished.connect(lambda: self.tool_actions["select"].trigger())
         self.view.viewport().installEventFilter(self)
+        self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.view.customContextMenuRequested.connect(self._context_menu)
+        self._last_paste_at: QPointF | None = None
+        self._paste_serial = 0
 
         qs = QSettings("N40", "N40")
         geom = qs.value("geometry")
@@ -182,6 +189,13 @@ class MainWindow(QMainWindow):
 
         self.a_undo = A("Отменить", self.undo, "Ctrl+Z", "undo")
         self.a_redo = A("Повторить", self.redo, "Ctrl+Y", "redo")
+        # Ctrl+C / Ctrl+X / Ctrl+V и их альтернативы Windows (Ctrl+Insert, Shift+Delete, Shift+Insert)
+        self.a_copy = A("Копировать", self.copy_selected, None, "copy", tip="Копировать  (Ctrl+C)")
+        self.a_copy.setShortcuts(QKeySequence.StandardKey.Copy)
+        self.a_cut = A("Вырезать", self.cut_selected, None, "cut", tip="Вырезать  (Ctrl+X)")
+        self.a_cut.setShortcuts(QKeySequence.StandardKey.Cut)
+        self.a_paste = A("Вставить", lambda: self.paste(), None, "paste", tip="Вставить  (Ctrl+V)")
+        self.a_paste.setShortcuts(QKeySequence.StandardKey.Paste)
         self.a_dup = A("Дублировать", self.duplicate, "Ctrl+D", "duplicate")
         self.a_del = A("Удалить", self.delete_selected, "Delete", "delete")
         self.a_all = A("Выделить всё", self.select_all, "Ctrl+A")
@@ -245,7 +259,8 @@ class MainWindow(QMainWindow):
                   self.a_egv, None, self.a_settings, None, self.a_quit):
             m.addSeparator() if a is None else m.addAction(a)
         m = mb.addMenu("Правка")
-        for a in (self.a_undo, self.a_redo, None, self.a_dup, self.a_del, None, self.a_all):
+        for a in (self.a_undo, self.a_redo, None, self.a_cut, self.a_copy, self.a_paste, None, self.a_dup,
+                  self.a_del, None, self.a_all):
             m.addSeparator() if a is None else m.addAction(a)
         m = mb.addMenu("Объект")
         for a in (self.a_rot_cw, self.a_rot_ccw, self.a_flip_h, self.a_flip_v, None):
@@ -295,7 +310,8 @@ class MainWindow(QMainWindow):
         act = QToolBar("Действия")
         act.setObjectName("Actions")
         act.setMovable(False)
-        for a in (self.a_import, None, self.a_undo, self.a_redo, None, self.a_dup, self.a_del, None,
+        for a in (self.a_import, None, self.a_undo, self.a_redo, None, self.a_cut, self.a_copy, self.a_paste,
+                  self.a_dup, self.a_del, None,
                   self.a_rot_ccw, self.a_rot_cw, self.a_flip_h, self.a_flip_v, None,
                   *self.align_actions.values(), self.a_dist_h, self.a_dist_v, None,
                   self.a_group, self.a_ungroup, None, self.a_union, self.a_diff, self.a_inter, None,
@@ -458,6 +474,112 @@ class MainWindow(QMainWindow):
             c.moveBy(5, 5)
             self._add_item(c)
         self._after_edit()
+
+    # ------------------------------------------------------------------ буфер обмена
+    def copy_selected(self) -> None:
+        sel = self.selected()
+        if not sel:
+            return
+        data = [it.to_dict(embed=True) if isinstance(it, RasterItem) else it.to_dict() for it in sel]
+        mime = QMimeData()
+        mime.setData(CLIPBOARD_MIME, json.dumps(data, ensure_ascii=False).encode("utf-8"))
+        QApplication.clipboard().setMimeData(mime)
+        self._last_paste_at = None
+        self._paste_serial = 0
+        self.statusBar().showMessage(f"Скопировано объектов: {len(sel)}", 2000)
+
+    def cut_selected(self) -> None:
+        if self.selected():
+            self.copy_selected()
+            self.delete_selected()
+
+    def can_paste(self) -> bool:
+        mime = QApplication.clipboard().mimeData()
+        return mime is not None and (mime.hasFormat(CLIPBOARD_MIME) or mime.hasImage())
+
+    def _cursor_scene_pos(self) -> QPointF | None:
+        vp = self.view.viewport()
+        p = vp.mapFromGlobal(QCursor.pos())
+        return self.view.mapToScene(p) if vp.rect().contains(p) else None
+
+    def paste(self, at: QPointF | None = None) -> None:
+        """Вставка объектов N40 или изображения из буфера обмена.
+
+        Левый верхний угол вставки — под курсором (или в точке вызова контекстного меню);
+        если курсор вне рабочего поля или вставка повторяется в той же точке — со сдвигом 5 мм.
+        """
+        mime = QApplication.clipboard().mimeData()
+        if mime is None:
+            return
+        items: list[N40Item] = []
+        if mime.hasFormat(CLIPBOARD_MIME):
+            try:
+                dicts = json.loads(bytes(mime.data(CLIPBOARD_MIME)).decode("utf-8"))
+                items = [clone_from_dict(d) for d in dicts]
+            except (ValueError, KeyError, TypeError):
+                return
+        elif mime.hasImage():
+            q = QImage(mime.imageData())
+            if q.isNull():
+                return
+            dpm = q.dotsPerMeterX() or 3780  # 3780 точек/м = 96 dpi
+            w_mm, h_mm = q.width() / dpm * 1000, q.height() / dpm * 1000
+            item = RasterItem(qimage_to_pil(q), w_mm, h_mm, "Изображение из буфера")
+            item.setPos(w_mm / 2, h_mm / 2)
+            items = [item]
+        if not items:
+            return
+
+        target = at if at is not None else self._cursor_scene_pos()
+        if target is not None:
+            target = self.view.snap_item_pos(target, None)
+        if target is not None and target != self._last_paste_at:
+            self._paste_serial = 0
+            self._last_paste_at = target
+            r = items_bbox(items)
+            delta = target - r.topLeft()
+        else:
+            self._paste_serial += 1
+            delta = QPointF(5, 5) * self._paste_serial
+            if target is not None:
+                r = items_bbox(items)
+                delta += target - r.topLeft()
+        self.push_undo()
+        self.scene.clearSelection()
+        for it in items:
+            it.moveBy(delta.x(), delta.y())
+            self._add_item(it)
+        self._after_edit()
+        self.statusBar().showMessage(f"Вставлено объектов: {len(items)}", 2000)
+
+    def _context_menu(self, pos) -> None:
+        if self.view.tool != "select":
+            return
+        hit = next((it for it in self.view.items(pos) if isinstance(it, N40Item)), None)
+        if hit is not None and not hit.isSelected():
+            self.scene.clearSelection()
+            hit.setSelected(True)
+        has_sel = bool(self.selected())
+        at = self.view.mapToScene(pos)
+        menu = QMenu(self)
+        cut = menu.addAction(self.a_cut.icon(), "Вырезать", self.cut_selected)
+        cut.setShortcut(QKeySequence(QKeySequence.StandardKey.Cut))
+        copy = menu.addAction(self.a_copy.icon(), "Копировать", self.copy_selected)
+        copy.setShortcut(QKeySequence(QKeySequence.StandardKey.Copy))
+        paste = menu.addAction(self.a_paste.icon(), "Вставить сюда", lambda: self.paste(at))
+        paste.setShortcut(QKeySequence(QKeySequence.StandardKey.Paste))
+        menu.addSeparator()
+        dup = menu.addAction(self.a_dup.icon(), "Дублировать", self.duplicate)
+        dup.setShortcut(self.a_dup.shortcut())
+        rot = menu.addAction(self.a_rot_cw.icon(), "Повернуть на 90°", lambda: self.rotate_selected(90))
+        flip = menu.addAction(self.a_flip_h.icon(), "Отразить по горизонтали", lambda: self.flip_selected(True))
+        menu.addSeparator()
+        delete = menu.addAction(self.a_del.icon(), "Удалить", self.delete_selected)
+        delete.setShortcut(self.a_del.shortcut())
+        for a in (cut, copy, dup, rot, flip, delete):
+            a.setEnabled(has_sel)
+        paste.setEnabled(self.can_paste())
+        menu.exec(self.view.viewport().mapToGlobal(pos))
 
     def rotate_selected(self, angle: float) -> None:
         sel = self.selected()

@@ -55,6 +55,16 @@ def pil_to_qimage(img: Image.Image) -> QImage:
     return q.copy()
 
 
+def qimage_to_pil(q: QImage) -> Image.Image:
+    """QImage -> PIL (оттенки серого, прозрачность на белом фоне)."""
+    rgba = q.convertToFormat(QImage.Format.Format_RGBA8888)
+    img = Image.frombuffer("RGBA", (rgba.width(), rgba.height()), bytes(rgba.constBits()),
+                           "raw", "RGBA", rgba.bytesPerLine(), 1)
+    bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
+    bg.alpha_composite(img)
+    return bg.convert("L")
+
+
 class N40Item:
     """Общая часть всех объектов (миксин к QGraphicsItem)."""
 
@@ -364,10 +374,15 @@ def item_from_dict(d: dict) -> N40Item:
     return {"vector": VectorItem, "raster": RasterItem, "region": RegionItem}[d["kind"]].from_dict(d)
 
 
-def clone_item(item: N40Item) -> N40Item:
-    new = item_from_dict(item.to_dict())
+def clone_from_dict(d: dict) -> N40Item:
+    """Новый объект по описанию (с новым uid) — для копий и вставки из буфера обмена."""
+    new = item_from_dict(d)
     new.uid = uuid.uuid4().hex[:8]
     return new
+
+
+def clone_item(item: N40Item) -> N40Item:
+    return clone_from_dict(item.to_dict())
 
 
 def items_bbox(items) -> QRectF:
