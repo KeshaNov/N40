@@ -10,8 +10,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QMimeData, QPointF, QSettings, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QCursor, QImage, QKeySequence
-from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QMainWindow, QMenu,
-                               QMessageBox,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QDoubleSpinBox, QFileDialog, QFormLayout, QHBoxLayout,
+                               QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QToolButton, QWidgetAction,
                                QSplitter, QTabWidget, QToolBar, QVBoxLayout, QWidget)
 
 from .. import APP_NAME, __version__
@@ -29,7 +29,7 @@ from .dialogs import (ArrayDialog, ImportDialog, NestDialog, OffsetDialog, Setti
 from .items import (N40Item, RasterItem, RegionItem, VectorItem, clone_from_dict, clone_item, item_from_dict,
                     items_bbox, qimage_to_pil)
 from .jobbuilder import build_operations
-from .panels import CameraPanel, LaserPanel, ObjectsPanel, PropertiesPanel
+from .panels import CameraPanel, LaserPanel, ObjectsPanel, PropertiesPanel, spin
 from .workers import CameraWorker, LaserWorker, NestWorker, UpdateWorker
 from .workspace import WorkArea, WorkScene
 
@@ -217,7 +217,9 @@ class MainWindow(QMainWindow):
         self.a_inter = A("Пересечение", lambda: self.boolean("intersection"), None, "intersection")
         self.a_array = A("Массив…", self.array, "Ctrl+M", "array")
         self.a_offset = A("Смещение контура…", self.offset, None, "offset")
-        self.a_nest = A("Нестинг…", self.nest, "Ctrl+Shift+N", "nest")
+        self.a_arrange = A("Авторасстановка", self.auto_arrange, "Ctrl+Shift+N", "nest",
+                           tip="Авторасстановка: разложить объекты на поле без наложений  (Ctrl+Shift+N)")
+        self.a_nest = A("Нестинг с параметрами…", self.nest)
 
         self.a_fit = A("Показать всё поле", self.view.zoom_fit, "Ctrl+0")
         self.a_zoom_in = A("Увеличить", lambda: self.view.zoom_by(1.25), "Ctrl+=")
@@ -286,6 +288,7 @@ class MainWindow(QMainWindow):
         m.addAction(self._act("Число сторон N-угольника…", self._ask_sides))
         m.addAction(self._act("Радиус скругления…", self._ask_radius))
         m = mb.addMenu("Раскрой")
+        m.addAction(self.a_arrange)
         m.addAction(self.a_nest)
         m = mb.addMenu("Вид")
         for a in (self.a_fit, self.a_zoom_in, self.a_zoom_out, None, self.a_snap_grid, self.a_snap_nodes, None):
@@ -315,9 +318,46 @@ class MainWindow(QMainWindow):
                   self.a_rot_ccw, self.a_rot_cw, self.a_flip_h, self.a_flip_v, None,
                   *self.align_actions.values(), self.a_dist_h, self.a_dist_v, None,
                   self.a_group, self.a_ungroup, None, self.a_union, self.a_diff, self.a_inter, None,
-                  self.a_array, self.a_offset, None, self.a_nest):
+                  self.a_array, self.a_offset, None):
             act.addSeparator() if a is None else act.addAction(a)
+        act.addWidget(self._build_arrange_button())
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, act)
+
+    def _build_arrange_button(self) -> QToolButton:
+        """Кнопка «Авторасстановка»: щелчок — разложить, стрелка — настройки."""
+        btn = QToolButton()
+        btn.setDefaultAction(self.a_arrange)
+        btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        btn.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+
+        box = QWidget()
+        box.setObjectName("Panel")
+        form = QFormLayout(box)
+        form.setContentsMargins(12, 10, 12, 10)
+        self.arrange_rotate = QCheckBox("Вращать объекты")
+        self.arrange_rotate.setToolTip("Разрешить поворот на 90°, 180° и 270° для плотной раскладки")
+        self.arrange_rotate.setChecked(self.settings.arrange_rotate)
+        self.arrange_gap = spin(0, 100, 1, " мм", 0.5)
+        self.arrange_gap.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.UpDownArrows)
+        self.arrange_gap.setValue(self.settings.arrange_gap)
+        form.addRow(self.arrange_rotate)
+        form.addRow("Зазор между объектами", self.arrange_gap)
+
+        def save():
+            self.settings.arrange_rotate = self.arrange_rotate.isChecked()
+            self.settings.arrange_gap = self.arrange_gap.value()
+            self.settings.save()
+
+        self.arrange_rotate.toggled.connect(save)
+        self.arrange_gap.valueChanged.connect(save)
+        menu = QMenu(btn)
+        wa = QWidgetAction(menu)
+        wa.setDefaultWidget(box)
+        menu.addAction(wa)
+        menu.addSeparator()
+        menu.addAction(self.a_nest)
+        btn.setMenu(menu)
+        return btn
 
     def _build_status(self) -> None:
         sb = self.statusBar()
@@ -900,6 +940,52 @@ class MainWindow(QMainWindow):
         Path(fn).write_text("\n".join(out), encoding="utf-8")
 
     # ================================================================== нестинг
+    def auto_arrange(self) -> None:
+        """Раскладывает выделенные (или все) объекты на рабочем поле без наложений.
+
+        Работает без лазера. Если на поле есть «Область раскроя» — раскладывает только в ней,
+        запретные зоны обходит. Расчёт идёт в фоне, интерфейс не блокируется.
+        """
+        if getattr(self, "_arrange_worker", None) is not None and self._arrange_worker.isRunning():
+            return
+        items = [it for it in self.selected() if it.is_output] or \
+                [it for it in self.scene.n40_items() if it.is_output and it.isVisible()]
+        if not items:
+            self.statusBar().showMessage("Нет объектов для авторасстановки", 3000)
+            return
+        s = self.settings
+        gap = s.arrange_gap
+        params = NestParams(sheet_width=s.bed_width, sheet_height=s.bed_height, gap=gap, margin=gap,
+                            angles=[0.0, 90.0, 180.0, 270.0] if s.arrange_rotate else [0.0], use_holes=True)
+        regions = [it for it in self.scene.n40_items() if isinstance(it, RegionItem) and not it.forbidden]
+        forbidden = [it for it in self.scene.n40_items() if isinstance(it, RegionItem) and it.forbidden]
+        if regions:
+            from shapely.ops import unary_union
+            params.container = unary_union([geo.to_shapely(r.world_contours()) for r in regions])
+        params.forbidden = [geo.to_shapely(r.world_contours()) for r in forbidden]
+
+        worker = NestWorker([NestPart(it, it.outline_contours(), 1) for it in items], params)
+        self._arrange_worker = worker
+        self.a_arrange.setEnabled(False)
+        worker.progress.connect(lambda a, b: self.statusBar().showMessage(
+            f"Авторасстановка… {int(a / max(b, 1) * 100)} %"))
+        worker.done.connect(self._arrange_done)
+        worker.failed.connect(lambda msg: self.statusBar().showMessage(msg, 5000))
+        worker.finished.connect(lambda: self.a_arrange.setEnabled(True))
+        worker.start()
+
+    def _arrange_done(self, result) -> None:
+        if result.placements:
+            self._apply_nest(result)
+        msg = f"Авторасстановка: размещено {len(result.placements)}, K = {result.utilization:.1f} %"
+        if result.unplaced:
+            msg += f", не поместилось {len(result.unplaced)} — оставлены на месте"
+            QMessageBox.warning(self, "Авторасстановка",
+                                f"Не поместилось объектов: {len(result.unplaced)}.\n"
+                                "Они оставлены на прежнем месте и могут перекрываться с остальными. "
+                                "Уменьшите зазор, разрешите вращение или освободите место на поле.")
+        self.statusBar().showMessage(msg, 6000)
+
     def nest(self) -> None:
         outputs = [it for it in self.scene.n40_items() if it.is_output]
         sel = [it for it in self.selected() if it.is_output] or outputs

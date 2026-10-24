@@ -33,6 +33,9 @@ class Settings:
     grid_step: float = 5.0
     snap_grid: bool = True
     snap_nodes: bool = True
+    # Авторасстановка
+    arrange_rotate: bool = True
+    arrange_gap: float = 2.0
     # Импорт
     svg_dpi: float = 96.0
     raster_default_dpi: float = 254.0
