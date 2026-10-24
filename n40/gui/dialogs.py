@@ -35,7 +35,7 @@ def _title(text: str) -> QLabel:
 # --------------------------------------------------------------------------- импорт
 
 class ImportDialog(QDialog):
-    def __init__(self, parent, settings, has_svg: bool, has_raster: bool):
+    def __init__(self, parent, settings, has_svg: bool, has_raster: bool, has_dxf: bool = False):
         super().__init__(parent)
         self.setWindowTitle("Параметры импорта")
         self.dpi = QComboBox()
@@ -51,10 +51,16 @@ class ImportDialog(QDialog):
         self.raster_dpi.setSpecialValueText("из файла")
         self.raster_dpi.setSuffix(" dpi")
         self.remember = QCheckBox("Запомнить DPI для SVG")
+        self.dxf_units = QComboBox()
+        for title, mm in (("Авто (из файла)", None), ("Миллиметры", 1.0), ("Сантиметры", 10.0),
+                          ("Метры", 1000.0), ("Дюймы", 25.4)):
+            self.dxf_units.addItem(title, mm)
         form = QFormLayout()
         if has_svg:
             form.addRow("Разрешение SVG", self.dpi)
             form.addRow("", self.remember)
+        if has_dxf:
+            form.addRow("Единицы DXF", self.dxf_units)
         if has_raster:
             form.addRow("Разрешение растра", self.raster_dpi)
         form.addRow("Масштаб", self.scale)
@@ -65,7 +71,8 @@ class ImportDialog(QDialog):
 
     def options(self) -> ImportOptions:
         return ImportOptions(svg_dpi=self.dpi.currentData(), scale=self.scale.value() / 100.0,
-                             raster_dpi=float(self.raster_dpi.value()) or None)
+                             raster_dpi=float(self.raster_dpi.value()) or None,
+                             dxf_units_mm=self.dxf_units.currentData())
 
 
 # --------------------------------------------------------------------------- текст

@@ -672,8 +672,9 @@ class MainWindow(QMainWindow):
     def import_files(self, files: list[str], drop_at: QPointF | None = None) -> None:
         has_svg = any(f.lower().endswith((".svg", ".pdf", ".ai")) for f in files)
         has_raster = any(Path(f).suffix.lower() in RASTER_EXT for f in files)
-        dlg = ImportDialog(self, self.settings, has_svg, has_raster)
-        if (has_svg or has_raster) and not dlg.exec():
+        has_dxf = any(f.lower().endswith(".dxf") for f in files)
+        dlg = ImportDialog(self, self.settings, has_svg, has_raster, has_dxf)
+        if (has_svg or has_raster or has_dxf) and not dlg.exec():
             return
         opts = dlg.options()
         if dlg.remember.isChecked():

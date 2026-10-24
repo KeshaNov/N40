@@ -47,6 +47,7 @@ class ImportOptions:
     svg_dpi: float = 96.0       # 96 (Inkscape ≥0.92), 90 (старый Inkscape), 72 (Illustrator)
     scale: float = 1.0          # ручной масштаб
     raster_dpi: float | None = None  # None — из файла, иначе принудительно
+    dxf_units_mm: float | None = None  # мм в одной единице DXF; None — определить автоматически
 
 
 def import_file(path: str | Path, opts: ImportOptions | None = None) -> list[ImportedObject]:
@@ -139,6 +140,21 @@ def import_svg(path: Path, opts: ImportOptions) -> list[ImportedObject]:
 # --------------------------------------------------------------------------- DXF
 
 _DXF_UNITS_MM = {0: 1.0, 1: 25.4, 2: 304.8, 4: 1.0, 5: 10.0, 6: 1000.0, 8: 0.0000254, 9: 0.0254, 10: 914.4}
+_IMPERIAL_UNITS = {1, 2, 8, 9, 10}
+
+
+def dxf_units_mm(header) -> float:
+    """Сколько мм в одной единице чертежа.
+
+    КОМПАС-3D (и ряд других CAD) пишет $INSUNITS=1 («дюймы») при чертеже в миллиметрах,
+    но правильно ставит $MEASUREMENT=1 (метрическая система). Если заголовок противоречит
+    сам себе, доверяем $MEASUREMENT и считаем единицы миллиметрами.
+    """
+    units = int(header.get("$INSUNITS", 0) or 0)
+    metric = int(header.get("$MEASUREMENT", 1) or 0) == 1
+    if units in _IMPERIAL_UNITS and metric:
+        return 1.0
+    return _DXF_UNITS_MM.get(units, 1.0)
 
 
 def import_dxf(path: Path, opts: ImportOptions) -> list[ImportedObject]:
@@ -150,8 +166,8 @@ def import_dxf(path: Path, opts: ImportOptions) -> list[ImportedObject]:
     except (IOError, ezdxf.DXFStructureError) as exc:
         raise ImportError_(f"Не удалось прочитать DXF: {exc}") from exc
 
-    units = int(doc.header.get("$INSUNITS", 4) or 4)
-    k = _DXF_UNITS_MM.get(units, 1.0) * opts.scale
+    unit_mm = opts.dxf_units_mm if opts.dxf_units_mm else dxf_units_mm(doc.header)
+    k = unit_mm * opts.scale
     contours: Contours = []
     skipped = 0
     for entity in disassemble.recursive_decompose(doc.modelspace()):
