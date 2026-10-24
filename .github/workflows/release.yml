@@ -1,0 +1,35 @@
+# Сборка релиза по тегу vX.Y.Z: N40.exe + установщик публикуются в GitHub Releases,
+# откуда их забирает встроенная проверка обновлений.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Проверка версии
+        shell: pwsh
+        run: |
+          $v = (python -c "import n40; print(n40.__version__)").Trim()
+          if ("v$v" -ne "${{ github.ref_name }}") { throw "Тег ${{ github.ref_name }} не совпадает с версией $v" }
+      - name: Сборка
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          ./packaging/build.ps1
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/N40-Setup-*.exe
+            dist/N40.exe
+          generate_release_notes: true

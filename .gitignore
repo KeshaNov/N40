@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+build/
+dist/
+packaging/n40.ico
+packaging/n40.png
+packaging/version_info.txt
+*.egv
+.idea/
+.vscode/
