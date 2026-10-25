@@ -31,6 +31,7 @@ CUSTOM_MODEL = "Пользовательский"
 
 # Модели лазера: название -> (плата контроллера, ширина поля, высота поля), мм
 LASER_MODELS: dict[str, tuple[str, float, float]] = {
+    "Zareff 3020 · M3 · 300×200": ("M3", 300.0, 200.0),
     "K40 · M2 Nano · 300×200": ("M2", 300.0, 200.0),
     "K40 · M2 Nano · 320×220": ("M2", 320.0, 220.0),
     "K40 · M2 Nano · 400×300": ("M2", 400.0, 300.0),
@@ -41,7 +42,7 @@ LASER_MODELS: dict[str, tuple[str, float, float]] = {
 
 @dataclass
 class Settings:
-    laser_model: str = "K40 · M2 Nano · 300×200"
+    laser_model: str = "Zareff 3020 · M3 · 300×200"
     # Рабочее поле, мм
     bed_width: float = 300.0
     bed_height: float = 200.0
@@ -58,7 +59,7 @@ class Settings:
     svg_dpi: float = 96.0
     raster_default_dpi: float = 254.0
     # Лазер
-    board: str = "M2"
+    board: str = "M3"
     cut_speed: float = 10.0
     engrave_speed: float = 50.0
     raster_speed: float = 100.0

@@ -446,7 +446,7 @@ class SettingsDialog(QDialog):
         self.bed_w.setValue(settings.bed_width)
         self.bed_h.setValue(settings.bed_height)
         self.board = QComboBox()
-        for b in ("M2", "M1", "M", "B2", "B1", "B", "A"):
+        for b in ("M3", "M2", "M1", "M", "B2", "B1", "B", "A"):
             self.board.addItem(b, b)
         self.board.setCurrentIndex(max(0, self.board.findData(settings.board)))
         self.cut, self.engr, self.rast = spin(1, 500, 1, " мм/с"), spin(1, 500, 1, " мм/с"), spin(1, 500, 1, " мм/с")
