@@ -1281,7 +1281,7 @@ class MainWindow(QMainWindow):
             self.camera_panel.btn_toggle.setChecked(True)
         backup = copy.deepcopy(self.settings.calibration)
         wiz = CalibrationWizard(self, self.settings, self.camera)
-        wiz.persp.burn_markers.connect(self.burn_markers)
+        wiz.zone.burn_markers.connect(self.burn_markers)
         if wiz.exec():
             self.settings.save()
             if self.camera:

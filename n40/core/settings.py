@@ -22,6 +22,9 @@ class CameraCalibration:
     image_size: list | None = None         # [w, h] кадра при калибровке
     homography: list | None = None         # 3x3: неискажённый кадр (px) -> поле (мм)
     rms: float | None = None
+    zone_mode: str = "corners"             # "corners" — углы поля, "markers" — выжженные метки
+    image_points: list | None = None       # 4 точки рабочей зоны на неискажённом кадре, px
+    field_points: list | None = None       # те же 4 точки на поле, мм
 
 
 CUSTOM_MODEL = "Пользовательский"
