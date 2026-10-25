@@ -24,8 +24,8 @@ from ..core.planner import mm_to_steps
 from ..core.settings import CUSTOM_MODEL, LASER_MODELS, Settings
 from . import style
 from .calibration import CalibrationWizard
-from .dialogs import (ArrayDialog, ImportDialog, NestDialog, OffsetDialog, SettingsDialog, TextDialog,
-                      ask_update)
+from .dialogs import (PRIMITIVE_FIELDS, ArrayDialog, ImportDialog, NestDialog, OffsetDialog, PrimitiveDialog,
+                      SettingsDialog, TextDialog, ask_update)
 from .items import (N40Item, RasterItem, RegionItem, VectorItem, clone_from_dict, clone_item, item_from_dict,
                     items_bbox, qimage_to_pil)
 from .jobbuilder import build_operations
@@ -117,6 +117,7 @@ class MainWindow(QMainWindow):
         self.scene.selectionChanged.connect(self._selection_changed)
         self.view.item_created.connect(self._item_created)
         self.view.text_requested.connect(self._create_text)
+        self.view.size_requested.connect(self._create_by_size)
         self.view.cursor_moved.connect(self._cursor_moved)
         self.view.view_changed.connect(self._update_zoom_label)
         self.view.tool_finished.connect(lambda: self.tool_actions["select"].trigger())
@@ -490,7 +491,10 @@ class MainWindow(QMainWindow):
         self.props.set_items(self.scene.selected_n40())
 
     def _selection_changed(self) -> None:
-        sel = self.scene.selected_n40()
+        try:
+            sel = self.scene.selected_n40()
+        except RuntimeError:  # окно закрывается без closeEvent (выход из приложения)
+            return
         self.props.set_items(sel)
         self.objects.sync_selection()
 
@@ -518,6 +522,25 @@ class MainWindow(QMainWindow):
     def _set_tool(self, key: str) -> None:
         self.view.set_tool(key)
         self.tool_actions[key].setChecked(True)
+        if key in PRIMITIVE_FIELDS:
+            self.statusBar().showMessage("Растяните мышью или щёлкните по полю, чтобы задать размеры цифрами", 6000)
+
+    def _create_by_size(self, tool: str, x: float, y: float) -> None:
+        """Щелчок инструментом без протягивания: размеры примитива вводятся цифрами."""
+        if tool not in PRIMITIVE_FIELDS:
+            return
+        overrides = {"rrect": {"r": self.view.rrect_radius}, "ngon": {"n": self.view.ngon_sides}}.get(tool)
+        dlg = PrimitiveDialog(self, tool, x, y, self.settings.primitive_sizes.get(tool), overrides)
+        if not dlg.exec():
+            return
+        values = dlg.values()
+        self.settings.primitive_sizes[tool] = values
+        self.settings.save()
+        if tool == "rrect":
+            self.view.rrect_radius = values["r"]
+        elif tool == "ngon":
+            self.view.ngon_sides = values["n"]
+        self._item_created(VectorItem(dlg.contours(), dlg.name()))
 
     def _ask_sides(self) -> None:
         n, ok = QInputDialog.getInt(self, "N-угольник", "Число сторон:", self.view.ngon_sides, 3, 100)
@@ -1360,6 +1383,8 @@ class MainWindow(QMainWindow):
                           "<p>github.com/KeshaNov/N40</p>")
 
     def closeEvent(self, e) -> None:
+        # сцена при уничтожении шлёт selectionChanged уже удалённым объектам
+        self.scene.selectionChanged.disconnect(self._selection_changed)
         QSettings("N40", "N40").setValue("geometry", self.saveGeometry())
         self.settings.save()
         if self.camera:

@@ -158,6 +158,7 @@ class WorkView(QGraphicsView):
     view_changed = Signal()
     item_created = Signal(object)        # N40Item
     text_requested = Signal(float, float)
+    size_requested = Signal(str, float, float)   # инструмент, точка щелчка (мм): ввод размеров цифрами
     tool_finished = Signal()
 
     TOOLS = ("select", "rect", "rrect", "ellipse", "circle", "line", "polyline", "ngon", "text",
@@ -298,8 +299,10 @@ class WorkView(QGraphicsView):
             return
         a, b = self._start, self._current or self._start
         self._start = None
-        if QLineF(a, b).length() < 0.2:
+        if QLineF(a, b).length() * self.transform().m11() < 4:
+            # щелчок без протягивания — размеры вводятся цифрами
             self.viewport().update()
+            self.size_requested.emit(self.tool, a.x(), a.y())
             return
         contours = self._make_shape(self.tool, a, b)
         if contours:

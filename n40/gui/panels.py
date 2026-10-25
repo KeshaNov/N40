@@ -20,7 +20,8 @@ def spin(lo=-10000.0, hi=10000.0, dec=2, suffix=" мм", step=1.0) -> QDoubleSpi
     s.setSingleStep(step)
     s.setSuffix(suffix)
     s.setKeyboardTracking(False)
-    s.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
+    # не NoButtons: с нашим QSS поле ввода у такого спинбокса схлопывается до 1 px и значение не видно
+    s.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.UpDownArrows)
     return s
 
 

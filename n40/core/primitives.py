@@ -34,7 +34,8 @@ def rectangle(x: float, y: float, w: float, h: float, radius: float = 0.0) -> Co
 
 
 def ellipse(cx: float, cy: float, rx: float, ry: float) -> Contours:
-    n = _arc_segments(max(rx, ry), 2 * math.pi)
+    # кратно 4, чтобы вершины попадали точно в крайние точки и габарит совпадал с размером
+    n = -(-_arc_segments(max(rx, ry), 2 * math.pi) // 4) * 4
     t = np.linspace(0, 2 * math.pi, n, endpoint=False)
     return [Contour(np.column_stack([cx + rx * np.cos(t), cy + ry * np.sin(t)]), True)]
 

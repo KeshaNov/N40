@@ -52,6 +52,8 @@ class Settings:
     # Авторасстановка
     arrange_rotate: bool = True
     arrange_gap: float = 2.0
+    # последние размеры примитивов, введённые цифрами: инструмент -> {поле: значение}
+    primitive_sizes: dict = field(default_factory=dict)
     # Импорт
     svg_dpi: float = 96.0
     raster_default_dpi: float = 254.0

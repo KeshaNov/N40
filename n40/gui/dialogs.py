@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QPainterPath
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFontComboBox,
@@ -93,6 +95,92 @@ def text_to_contours(text: str, font: QFont, height_mm: float, x: float, y: floa
         if len(pts) >= 3:
             out.append(Contour(pts, True))
     return out
+
+
+# --------------------------------------------------------------------------- примитивы цифрами
+
+PRIMITIVE_NAMES = {"rect": "Прямоугольник", "rrect": "Скруглённый прямоугольник", "ellipse": "Эллипс",
+                   "circle": "Окружность", "line": "Линия", "ngon": "Правильный многоугольник"}
+
+# инструмент -> [(ключ, подпись, мин, макс, знаков, суффикс, по умолчанию)]
+PRIMITIVE_FIELDS = {
+    "rect": [("w", "Ширина", 0.1, 2000, 2, " мм", 50.0), ("h", "Высота", 0.1, 2000, 2, " мм", 30.0)],
+    "rrect": [("w", "Ширина", 0.1, 2000, 2, " мм", 50.0), ("h", "Высота", 0.1, 2000, 2, " мм", 30.0),
+              ("r", "Радиус скругления", 0, 1000, 2, " мм", 5.0)],
+    "ellipse": [("w", "Ширина", 0.1, 2000, 2, " мм", 50.0), ("h", "Высота", 0.1, 2000, 2, " мм", 30.0)],
+    "circle": [("d", "Диаметр", 0.1, 2000, 2, " мм", 40.0)],
+    "line": [("length", "Длина", 0.1, 2000, 2, " мм", 50.0), ("angle", "Угол", -360, 360, 1, "°", 0.0)],
+    "ngon": [("n", "Число сторон", 3, 100, 0, "", 6.0), ("d", "Диаметр описанной окружности", 0.1, 2000, 2, " мм", 40.0),
+             ("rot", "Поворот", -360, 360, 1, "°", 0.0)],
+}
+PRIMITIVE_ANCHOR = {"rect": "левый верхний угол", "rrect": "левый верхний угол", "ellipse": "левый верхний угол",
+                    "circle": "центр", "ngon": "центр", "line": "начало"}
+
+
+class PrimitiveDialog(QDialog):
+    """Создание примитива с размерами, заданными цифрами (щелчок инструментом без протягивания)."""
+
+    def __init__(self, parent, tool: str, x: float, y: float, last: dict | None = None,
+                 overrides: dict | None = None):
+        super().__init__(parent)
+        self.tool = tool
+        self.setWindowTitle(PRIMITIVE_NAMES[tool])
+        # значения из меню «Рисование» (число сторон, радиус) важнее запомненных
+        last = {**(last or {}), **(overrides or {})}
+        self.fields: dict[str, QDoubleSpinBox] = {}
+        form = QFormLayout()
+        for key, label, lo, hi, dec, suffix, default in PRIMITIVE_FIELDS[tool]:
+            box = spin(lo, hi, dec, suffix, 1 if dec == 0 else 0.5)
+            box.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.UpDownArrows)
+            box.setValue(float(last.get(key, default)))
+            form.addRow(label, box)
+            self.fields[key] = box
+        self.x, self.y = spin(), spin()
+        self.x.setValue(x)
+        self.y.setValue(y)
+        pos = QHBoxLayout()
+        pos.addWidget(QLabel("X"))
+        pos.addWidget(self.x)
+        pos.addWidget(QLabel("Y"))
+        pos.addWidget(self.y)
+        form.addRow(f"Положение ({PRIMITIVE_ANCHOR[tool]})", pos)
+        if tool == "line":
+            hint = QLabel("Угол отсчитывается от оси X против часовой стрелки: 0° — вправо, 90° — вверх.")
+            hint.setObjectName("Caption")
+            hint.setWordWrap(True)
+            form.addRow(hint)
+        lay = QVBoxLayout(self)
+        lay.addWidget(_title(PRIMITIVE_NAMES[tool]))
+        lay.addLayout(form)
+        lay.addWidget(_buttons(self, "Создать"))
+        first = next(iter(self.fields.values()))
+        first.setFocus()
+        first.selectAll()
+
+    def values(self) -> dict:
+        return {k: (int(b.value()) if k == "n" else b.value()) for k, b in self.fields.items()}
+
+    def name(self) -> str:
+        return f"{self.values()['n']}-угольник" if self.tool == "ngon" else PRIMITIVE_NAMES[self.tool]
+
+    def contours(self):
+        from ..core import primitives as prim
+        v, x, y = self.values(), self.x.value(), self.y.value()
+        t = self.tool
+        if t == "rect":
+            return prim.rectangle(x, y, v["w"], v["h"])
+        if t == "rrect":
+            return prim.rectangle(x, y, v["w"], v["h"], v["r"])
+        if t == "ellipse":
+            return prim.ellipse(x + v["w"] / 2, y + v["h"] / 2, v["w"] / 2, v["h"] / 2)
+        if t == "circle":
+            return prim.circle(x, y, v["d"] / 2)
+        if t == "line":
+            a = math.radians(v["angle"])
+            return prim.line(x, y, x + v["length"] * math.cos(a), y - v["length"] * math.sin(a))
+        if t == "ngon":
+            return prim.regular_polygon(x, y, v["d"] / 2, v["n"], -90.0 + v["rot"])
+        raise ValueError(t)
 
 
 class TextDialog(QDialog):
