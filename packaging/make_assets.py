@@ -1,7 +1,10 @@
 """Генерирует n40.ico и version_info.txt для PyInstaller из исходников (версия — из n40/__init__.py)."""
 
+import os
 import sys
 from pathlib import Path
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")  # CI-сборка без дисплея
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT.parent))

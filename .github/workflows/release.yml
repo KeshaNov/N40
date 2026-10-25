@@ -27,6 +27,13 @@ jobs:
         run: |
           choco install innosetup -y --no-progress
           ./packaging/build.ps1
+      - name: Самопроверка собранного N40.exe
+        shell: pwsh
+        run: |
+          $p = Start-Process dist/N40.exe -ArgumentList "--self-test=selftest.txt" -Wait -PassThru
+          Get-Content selftest.txt
+          if ($p.ExitCode -ne 0) { throw "Самопроверка N40.exe не прошла" }
+          if (-not (Test-Path dist/N40-Setup-*.exe)) { throw "Установщик не собран" }
       - uses: softprops/action-gh-release@v2
         with:
           files: |

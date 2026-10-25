@@ -6,6 +6,11 @@ import sys
 
 
 def main() -> None:
+    for arg in sys.argv[1:]:
+        if arg.startswith("--self-test"):
+            from .selftest import run
+            sys.exit(run(arg.partition("=")[2] or "n40-selftest.txt"))
+
     from PySide6.QtCore import QLocale, QTranslator, QLibraryInfo
     from PySide6.QtWidgets import QApplication
 
