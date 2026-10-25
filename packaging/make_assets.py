@@ -9,9 +9,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")  # CI-сборка без 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT.parent))
 
+from n40 import __version__  # noqa: E402  (n40 первым: подставляет PySide2 под именем PySide6 на Python 3.8)
 from PySide6.QtWidgets import QApplication  # noqa: E402
-
-from n40 import __version__  # noqa: E402
 from n40.gui.style import app_icon  # noqa: E402
 
 app = QApplication([])

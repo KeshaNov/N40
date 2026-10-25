@@ -1,5 +1,5 @@
 ; Inno Setup: установщик N40
-; Сборка: iscc /DAppVersion=0.1.0 packaging\n40.iss   (после PyInstaller)
+; Сборка: iscc /DAppVersion=0.1.0 packaging\n40.iss   (после PyInstaller: папка dist\N40)
 
 #ifndef AppVersion
   #define AppVersion "0.1.0"
@@ -23,6 +23,8 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+; Windows 7 SP1 и новее (Python 3.8 + Qt 5)
+MinVersion=6.1sp1
 CloseApplications=yes
 PrivilegesRequiredOverridesAllowed=dialog
 
@@ -34,7 +36,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "assoc"; Description: "Открывать файлы проектов .n40 в N40"; GroupDescription: "Ассоциации:"
 
 [Files]
-Source: "..\dist\N40.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\N40\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\N40"; Filename: "{app}\N40.exe"

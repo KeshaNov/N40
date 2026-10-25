@@ -1,4 +1,4 @@
-# Сборка релиза по тегу vX.Y.Z: N40.exe + установщик публикуются в GitHub Releases,
+# Сборка релиза по тегу vX.Y.Z: установщик и переносной zip публикуются в GitHub Releases,
 # откуда их забирает встроенная проверка обновлений.
 name: release
 
@@ -14,9 +14,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      # Python 3.8 + Qt 5: последний стек с поддержкой Windows 7 и процессоров без SSE4.2
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.8"
+          architecture: x64
       - name: Проверка версии
         shell: pwsh
         run: |
@@ -26,17 +28,21 @@ jobs:
         shell: pwsh
         run: |
           choco install innosetup -y --no-progress
+          $env:N40_BUILD_BOOTLOADER = "1"   # свой загрузчик PyInstaller: меньше ложных срабатываний антивирусов
+          $env:N40_REQUIRE_UCRT = "1"       # DLL Universal CRT для Windows 7 обязательны
           ./packaging/build.ps1
       - name: Самопроверка собранного N40.exe
         shell: pwsh
         run: |
-          $p = Start-Process dist/N40.exe -ArgumentList "--self-test=selftest.txt" -Wait -PassThru
+          $p = Start-Process dist/N40/N40.exe -ArgumentList "--self-test=selftest.txt" -Wait -PassThru
           Get-Content selftest.txt
           if ($p.ExitCode -ne 0) { throw "Самопроверка N40.exe не прошла" }
           if (-not (Test-Path dist/N40-Setup-*.exe)) { throw "Установщик не собран" }
+          if (-not (Test-Path dist/N40-portable-*.zip)) { throw "Переносной архив не собран" }
+          if (-not (Test-Path dist/N40/ucrtbase.dll)) { throw "Нет DLL Universal CRT для Windows 7" }
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/N40-Setup-*.exe
-            dist/N40.exe
+            dist/N40-portable-*.zip
           generate_release_notes: true

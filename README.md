@@ -1,7 +1,15 @@
 # N40
 
-Замена K40 Whisperer для CO₂-лазеров K40 с контроллером **M2 Nano / Lihuiyu (LHYMICRO-GL)**.
+Замена K40 Whisperer для CO₂-лазеров с контроллерами **Lihuiyu M2 / M3 Nano (LHYMICRO-GL)** —
+в первую очередь **Zareff 3020 (M3, поле 300×200 мм)** и других K40.
 Русский интерфейс, камера над полем, нестинг, примитивы и булевы операции.
+
+Работает на **Windows 7 SP1, 8, 10 и 11** (64 бит), в том числе на старых процессорах без SSE4.2.
+
+## Установка
+
+Скачайте со страницы [Releases](https://github.com/KeshaNov/N40/releases) установщик `N40-Setup-<версия>.exe`
+или переносной архив `N40-portable-<версия>.zip` (распакуйте и запустите `N40\N40.exe`).
 
 ## Возможности
 
@@ -30,6 +38,10 @@ python -m pip install -r requirements.txt
 python run_n40.py
 ```
 
+`requirements.txt` — современные версии (Qt 6, Python 3.11+) для разработки.
+Релиз собирается на Python 3.8 + Qt 5 (`packaging/requirements-release.txt`), чтобы работать на Windows 7;
+код совместим с обоими благодаря `n40/qtcompat.py`.
+
 Драйвер USB: как для K40 Whisperer — через [Zadig](https://zadig.akeo.ie/) установите **WinUSB**
 (или libusb-win32) для устройства `USB-EPP/I2C... CH341A` (VID 1A86, PID 5512).
 `libusb-1.0.dll` поставляется пакетом `libusb-package`.
@@ -37,10 +49,13 @@ python run_n40.py
 ## Сборка .exe и установщика
 
 ```
+$env:N40_PYTHON = "путь\к\python3.8\python.exe"
 powershell -File packaging\build.ps1
 ```
 
-Нужен [Inno Setup 6](https://jrsoftware.org/isinfo.php). Результат: `dist\N40.exe` и `dist\N40-Setup-<версия>.exe`.
+Нужны Python 3.8 x64 и [Inno Setup 6](https://jrsoftware.org/isinfo.php). Результат: папка `dist\N40`,
+`dist\N40-portable-<версия>.zip` и `dist\N40-Setup-<версия>.exe`.
+Проверка собранной программы: `dist\N40\N40.exe --self-test=отчёт.txt` (код возврата 0 — всё в порядке).
 
 ## Выпуск обновления
 
@@ -63,4 +78,8 @@ packaging/     PyInstaller, Inno Setup, скрипт сборки
   [MeerK40t](https://github.com/meerk40t/meerk40t) (MIT) и [K40 Whisperer](https://www.scorchworks.com/K40whisperer/k40whisperer.html) (GPL-3.0).
   Перед первым запуском сравните экспорт `.EGV` с K40 Whisperer и проверьте задание на малой мощности.
 - Мощность лазера у K40 задаётся ручкой/кнопками на панели станка, программно — только скорость.
-- Windows 7 стеком Python 3.11+ / Qt 6 не поддерживается (минимум Windows 10).
+- Windows XP не поддерживается (Python 3.8 и Qt 5.15 требуют Windows 7 SP1).
+- Антивирусы: программа не подписана сертификатом, поэтому Windows SmartScreen и некоторые антивирусы
+  могут предупреждать о ней. Чтобы снизить ложные срабатывания, релиз собирается папкой (а не одним
+  самораспаковывающимся exe) и с собственным загрузчиком PyInstaller. Полностью убирает предупреждения
+  только подпись кода (например, бесплатная для open-source программ [SignPath Foundation](https://signpath.org/)).
