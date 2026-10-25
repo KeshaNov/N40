@@ -257,7 +257,11 @@ def import_pdf(path: Path, opts: ImportOptions) -> list[ImportedObject]:
 
 def _rasterize_pdf(path: Path, opts: ImportOptions, dpi: float = 300.0) -> ImportedObject:
     from PySide6.QtCore import QSize
-    from PySide6.QtPdf import QPdfDocument
+    try:
+        from PySide6.QtPdf import QPdfDocument
+    except ImportError:  # Qt 5 (сборка под Windows 7): модуля QtPdf нет
+        raise ImportError_("Для импорта PDF/AI установите Inkscape (inkscape.org) — "
+                           "N40 откроет файл через него") from None
 
     doc = QPdfDocument()
     doc.load(str(path))

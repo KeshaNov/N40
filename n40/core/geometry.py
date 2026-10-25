@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Iterable, Sequence
+from typing import Iterable, List, Sequence
 
 import numpy as np
 import pyclipper
@@ -53,7 +53,7 @@ class Contour:
         return cls(np.array(data["points"], dtype=float), bool(data["closed"]))
 
 
-Contours = list[Contour]
+Contours = List[Contour]  # typing.List: сборка под Windows 7 на Python 3.8
 
 
 # --------------------------------------------------------------------------- bbox / transforms

@@ -25,6 +25,11 @@ def main() -> None:
         except Exception:  # noqa: BLE001
             pass
 
+    from PySide6.QtCore import Qt
+    from . import qtcompat
+    if not qtcompat.QT6:  # Qt 5 (сборка под Windows 7): масштабирование на мониторах с высоким DPI
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(__version__)

@@ -586,8 +586,9 @@ class MainWindow(QMainWindow):
         if not sel:
             return
         data = [it.to_dict(embed=True) if isinstance(it, RasterItem) else it.to_dict() for it in sel]
+        self._clip_data = json.dumps(data, ensure_ascii=False).encode("utf-8")
         mime = QMimeData()
-        mime.setData(CLIPBOARD_MIME, json.dumps(data, ensure_ascii=False).encode("utf-8"))
+        mime.setData(CLIPBOARD_MIME, self._clip_data)
         QApplication.clipboard().setMimeData(mime)
         self._last_paste_at = None
         self._paste_serial = 0
@@ -598,9 +599,31 @@ class MainWindow(QMainWindow):
             self.copy_selected()
             self.delete_selected()
 
+    def _clipboard_payload(self, read_image: bool = True):
+        """Содержимое буфера обмена: ("items", bytes) | ("image", QImage) | (None, None).
+
+        Если буфер принадлежит N40, берём свою копию данных и не трогаем QMimeData: в PySide2 (Qt 5)
+        после смены буфера mimeData() может вернуть обёртку уже удалённого объекта.
+        """
+        cb = QApplication.clipboard()
+        own = getattr(self, "_clip_data", None)
+        if own and cb.ownsClipboard() and cb.image().isNull():
+            return "items", own
+        try:
+            mime = cb.mimeData()
+            if mime is None:
+                return None, None
+            if mime.hasFormat(CLIPBOARD_MIME):
+                return "items", bytes(mime.data(CLIPBOARD_MIME))
+            if mime.hasImage():
+                return "image", QImage(mime.imageData()) if read_image else None
+            return None, None
+        except RuntimeError:
+            img = cb.image()
+            return ("image", img) if not img.isNull() else (None, None)
+
     def can_paste(self) -> bool:
-        mime = QApplication.clipboard().mimeData()
-        return mime is not None and (mime.hasFormat(CLIPBOARD_MIME) or mime.hasImage())
+        return self._clipboard_payload(read_image=False)[0] is not None
 
     def _cursor_scene_pos(self) -> QPointF | None:
         vp = self.view.viewport()
@@ -613,18 +636,16 @@ class MainWindow(QMainWindow):
         Левый верхний угол вставки — под курсором (или в точке вызова контекстного меню);
         если курсор вне рабочего поля или вставка повторяется в той же точке — со сдвигом 5 мм.
         """
-        mime = QApplication.clipboard().mimeData()
-        if mime is None:
-            return
+        kind, payload = self._clipboard_payload()
         items: list[N40Item] = []
-        if mime.hasFormat(CLIPBOARD_MIME):
+        if kind == "items":
             try:
-                dicts = json.loads(bytes(mime.data(CLIPBOARD_MIME)).decode("utf-8"))
+                dicts = json.loads(payload.decode("utf-8"))
                 items = [clone_from_dict(d) for d in dicts]
             except (ValueError, KeyError, TypeError):
                 return
-        elif mime.hasImage():
-            q = QImage(mime.imageData())
+        elif kind == "image":
+            q = payload
             if q.isNull():
                 return
             dpm = q.dotsPerMeterX() or 3780  # 3780 точек/м = 96 dpi
